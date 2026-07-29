@@ -37,3 +37,4 @@ next-env.d.ts
 
 # Print Runs V2 installer backups
 .pr-v2-backup-*/
+*.sh
