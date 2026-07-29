@@ -15,10 +15,12 @@ const schema = z.object({
   password: z.string().min(8).max(100),
   // printer-only
   businessName: z.string().max(120).optional(),
-  addressText: z.string().max(240).optional(),
+  addressLine1: z.string().max(160).optional(),
+  addressLine2: z.string().max(160).optional(),
+  addressCity: z.string().max(80).optional(),
+  addressState: z.string().max(80).optional(),
   lat: z.number().optional(),
   lng: z.number().optional(),
-  supportsPickup: z.boolean().optional(),
 });
 
 export async function POST(req: Request) {
@@ -54,10 +56,12 @@ export async function POST(req: Request) {
       code: vendorCode(),
       businessName: d.businessName!,
       slug: `${base}-${user.id.slice(0, 6)}`,
-      addressText: d.addressText,
+      addressLine1: d.addressLine1,
+      addressLine2: d.addressLine2,
+      addressCity: d.addressCity,
+      addressState: d.addressState,
       lat: d.lat,
       lng: d.lng,
-      supportsPickup: d.supportsPickup ?? false,
     });
   }
 

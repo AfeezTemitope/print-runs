@@ -44,8 +44,10 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
           phone: f.get('phone'),
           password: f.get('password'),
           businessName: f.get('businessName') || undefined,
-          addressText: f.get('addressText') || undefined,
-          supportsPickup: f.get('supportsPickup') === 'on',
+          addressLine1: f.get('addressLine1') || undefined,
+          addressLine2: f.get('addressLine2') || undefined,
+          addressCity: f.get('addressCity') || undefined,
+          addressState: f.get('addressState') || undefined,
           ...(coords ?? {}),
         };
 
@@ -72,23 +74,29 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
         {mode === 'login' ? 'Log in to print, track and manage orders.' : 'One account to print — or to sell your printing.'}
       </p>
 
-      <div className="mt-6 flex gap-1.5 rounded-pill bg-black/5 p-1" role="tablist" aria-label="Account type">
-        {(['customer', 'printer', 'designer'] as Tab[]).map((t) => (
-          <button
-            key={t}
-            role="tab"
-            aria-selected={tab === t}
-            disabled={t === 'designer'}
-            onClick={() => setTab(t)}
-            className={`flex-1 rounded-pill px-3 py-2 font-display text-[13px] font-bold capitalize transition-colors ${
-              tab === t ? 'bg-navy text-white' : 'text-navy disabled:opacity-35'
-            }`}
-          >
-            {t === 'customer' ? 'Individual' : t}
-            {t === 'designer' && <span className="ml-1 font-mono text-[9px] uppercase opacity-70">soon</span>}
-          </button>
-        ))}
-      </div>
+      {/* V2 fix: the tab selector only appears when creating an account. On login, the
+          account's role is authoritative — V1 showed these tabs during login too, but the
+          submit handler ignored `tab` entirely, so a printer account could "log in via the
+          Individual tab" and land in the wrong place with no actual check ever happening. */}
+      {mode === 'register' && (
+        <div className="mt-6 flex gap-1.5 rounded-pill bg-black/5 p-1" role="tablist" aria-label="Account type">
+          {(['customer', 'printer', 'designer'] as Tab[]).map((t) => (
+            <button
+              key={t}
+              role="tab"
+              aria-selected={tab === t}
+              disabled={t === 'designer'}
+              onClick={() => setTab(t)}
+              className={`flex-1 rounded-pill px-3 py-2 font-display text-[13px] font-bold capitalize transition-colors ${
+                tab === t ? 'bg-navy text-white' : 'text-navy disabled:opacity-35'
+              }`}
+            >
+              {t === 'customer' ? 'Individual' : t}
+              {t === 'designer' && <span className="ml-1 font-mono text-[9px] uppercase opacity-70">soon</span>}
+            </button>
+          ))}
+        </div>
+      )}
 
       <form onSubmit={submit} className="mt-6 space-y-4">
         {mode === 'register' && (
@@ -108,17 +116,16 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
         {mode === 'register' && tab === 'printer' && (
           <div className="space-y-4 rounded-2xl border border-black/12 bg-pale/30 p-4">
             <Field label="Business name"><Input name="businessName" required placeholder="e.g. Lekki Prints Hub" /></Field>
-            <Field label="Shop address" hint="Customers see printers sorted by distance — set your location.">
-              <Input name="addressText" required placeholder="e.g. 12 Bode Thomas, Surulere" />
-            </Field>
+            <Field label="Address line 1"><Input name="addressLine1" required placeholder="e.g. 12 Bode Thomas Street" /></Field>
+            <Field label="Address line 2" hint="Optional — landmark, floor, unit."><Input name="addressLine2" placeholder="e.g. 2nd floor, opposite the bank" /></Field>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="City"><Input name="addressCity" required placeholder="e.g. Surulere" /></Field>
+              <Field label="State"><Input name="addressState" required placeholder="e.g. Lagos" /></Field>
+            </div>
             <div className="flex flex-wrap items-center gap-3">
               <Button type="button" variant="tertiary" size="sm" onClick={locate} disabled={locating}>
                 <LocateFixed className="size-4" /> {coords ? 'Location captured ✓' : locating ? 'Locating…' : 'Use my current location'}
               </Button>
-              <label className="inline-flex items-center gap-2 font-display text-[13px] font-bold text-navy">
-                <input type="checkbox" name="supportsPickup" className="size-4 accent-blue" />
-                Customers can self-pickup
-              </label>
             </div>
           </div>
         )}

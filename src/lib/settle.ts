@@ -1,16 +1,70 @@
 import { eq } from 'drizzle-orm';
 import { db, tables } from '@/db';
 import { paystackVerify } from '@/lib/paystack';
+import { computePrice } from '@/lib/pricing';
+import type { OrderSpec } from '@/db/schema';
 
 /**
- * Verify with Paystack and settle the order. Idempotent — the callback page
- * and the webhook both call this, whichever lands first wins, the other no-ops.
- * Payment success moves the order into the queue: status 'printing'.
+ * V2 order-creation metadata (decision — Batch 1 duplicate-order fix). Everything Paystack
+ * needs to hand back at verification time so the order row can be created for the FIRST time
+ * here, once payment is confirmed — never earlier. checkout/route.ts never inserts an order
+ * row for a priced (non-quote) order; it only reaches Paystack. This is what makes that safe:
+ * if a customer abandons payment, there is no stray "unpaid" row cluttering the queue, and a
+ * retried checkout can't create two rows for one purchase, since orders.code is unique and the
+ * insert below is a no-op on conflict.
+ */
+export type PendingOrderMetadata = {
+  customerId: string;
+  shopId: string;
+  productId: string;
+  spec: OrderSpec;
+  printerBaseKobo: number;
+  marginKobo: number;
+  sellingPriceKobo: number;
+  platformFeeKobo: number;
+  amountPaidKobo: number;
+  deliveryAddress: string;
+  contactEmail: string;
+  contactPhonePrimary: string;
+  contactPhoneSecondary: string;
+  designFileUrl: string | null;
+  designFileName: string | null;
+  printNote: string | null;
+};
+
+function isPendingOrderMetadata(m: unknown): m is PendingOrderMetadata {
+  if (!m || typeof m !== 'object') return false;
+  const r = m as Record<string, unknown>;
+  return (
+    typeof r.customerId === 'string' &&
+    typeof r.shopId === 'string' &&
+    typeof r.productId === 'string' &&
+    typeof r.spec === 'object' && r.spec !== null &&
+    typeof r.printerBaseKobo === 'number' &&
+    typeof r.marginKobo === 'number' &&
+    typeof r.sellingPriceKobo === 'number' &&
+    typeof r.platformFeeKobo === 'number' &&
+    typeof r.amountPaidKobo === 'number' &&
+    typeof r.deliveryAddress === 'string' &&
+    typeof r.contactEmail === 'string' &&
+    typeof r.contactPhonePrimary === 'string' &&
+    typeof r.contactPhoneSecondary === 'string'
+  );
+}
+
+/**
+ * Verify with Paystack and, on first successful verification, CREATE the order.
+ * Idempotent — the callback page and the webhook both call this, whichever lands first wins:
+ * - If an order with this code already exists and is paid, no-op.
+ * - Otherwise verify with Paystack, recompute the price server-side from the metadata's spec
+ *   (never trust the metadata's own kobo figures as gospel — only as the shape of the order),
+ *   confirm what Paystack actually charged matches that recomputation, then insert the order.
+ * - The unique constraint on orders.code makes a genuine race between the webhook and the
+ *   callback page harmless: whichever insert loses is treated as an idempotent no-op.
  */
 export async function settlePayment(reference: string): Promise<{ ok: true } | { ok: false; message: string }> {
-  const [order] = await db().select().from(tables.orders).where(eq(tables.orders.code, reference)).limit(1);
-  if (!order) return { ok: false, message: 'We could not find that order.' };
-  if (order.paymentStatus === 'paid') return { ok: true }; // already settled
+  const [existing] = await db().select().from(tables.orders).where(eq(tables.orders.code, reference)).limit(1);
+  if (existing && existing.paymentStatus === 'paid') return { ok: true }; // already settled
 
   let data: Awaited<ReturnType<typeof paystackVerify>>;
   try {
@@ -20,17 +74,85 @@ export async function settlePayment(reference: string): Promise<{ ok: true } | {
   }
 
   if (data.status !== 'success') return { ok: false, message: 'The payment was not completed.' };
-  if (order.priceKobo != null && data.amount < order.priceKobo) {
+
+  // Legacy/edge path: an order row already exists (e.g. a quote that later got a manual
+  // payment link). Fall back to the old update-in-place behaviour rather than double-insert.
+  if (existing) {
+    if (existing.amountPaidKobo != null && data.amount < existing.amountPaidKobo) {
+      return { ok: false, message: 'Amount mismatch — contact support with your reference.' };
+    }
+    await db().update(tables.orders)
+      .set({ paymentStatus: 'paid', status: 'order_received', updatedAt: new Date() })
+      .where(eq(tables.orders.id, existing.id));
+    await db().insert(tables.payments).values({
+      orderId: existing.id,
+      reference,
+      amountKobo: data.amount,
+      channel: data.channel,
+      status: data.status,
+      paidAt: data.paid_at ? new Date(data.paid_at) : new Date(),
+      raw: data as unknown as Record<string, unknown>,
+    }).onConflictDoNothing();
+    return { ok: true };
+  }
+
+  // Expected path for every priced order: create it for the first time, right here.
+  const meta = data.metadata;
+  if (!isPendingOrderMetadata(meta)) {
+    return { ok: false, message: 'Payment succeeded but order details were missing — contact support with your reference.' };
+  }
+
+  const [product] = await db().select().from(tables.products).where(eq(tables.products.id, meta.productId)).limit(1);
+  if (!product) {
+    return { ok: false, message: 'That product is no longer available — contact support with your reference, you were charged.' };
+  }
+  const [variants, addons] = await Promise.all([
+    db().select().from(tables.productVariants).where(eq(tables.productVariants.productId, product.id)),
+    db().select().from(tables.productAddons).where(eq(tables.productAddons.productId, product.id)),
+  ]);
+
+  // Recompute from the spec — the metadata's own kobo numbers are never trusted blindly.
+  // meta.spec is typed as the DB's OrderSpec (slightly looser types for JSON storage) but was
+  // built from a validated CustomerSpec in checkout/route.ts before being handed to Paystack.
+  const recomputed = computePrice(meta.spec as unknown as Parameters<typeof computePrice>[0], product, variants, addons);
+  if (!recomputed.ok || recomputed.totalKobo !== meta.printerBaseKobo) {
+    return { ok: false, message: 'Pricing changed after payment — contact support with your reference, you were charged.' };
+  }
+  if (data.amount !== meta.amountPaidKobo) {
     return { ok: false, message: 'Amount mismatch — contact support with your reference.' };
   }
 
-  await db().update(tables.orders)
-    .set({ paymentStatus: 'paid', status: 'printing', updatedAt: new Date() })
-    .where(eq(tables.orders.id, order.id));
+  const [order] = await db().insert(tables.orders).values({
+    code: reference,
+    customerId: meta.customerId,
+    shopId: meta.shopId,
+    productId: meta.productId,
+    spec: { ...meta.spec, breakdown: recomputed.lines },
+    isQuote: false,
+    printerBaseKobo: meta.printerBaseKobo,
+    marginKobo: meta.marginKobo,
+    sellingPriceKobo: meta.sellingPriceKobo,
+    platformFeeKobo: meta.platformFeeKobo,
+    amountPaidKobo: meta.amountPaidKobo,
+    fulfillmentMethod: 'delivery', // never customer-chosen at checkout (decision, 28 Jul)
+    deliveryAddress: meta.deliveryAddress,
+    contactEmail: meta.contactEmail,
+    contactPhonePrimary: meta.contactPhonePrimary,
+    contactPhoneSecondary: meta.contactPhoneSecondary,
+    status: 'order_received',
+    paymentStatus: 'paid',
+    settlementStatus: 'pending',
+    designFileUrl: meta.designFileUrl,
+    designFileName: meta.designFileName,
+    printNote: meta.printNote,
+  }).onConflictDoNothing({ target: tables.orders.code }).returning();
 
-  // Ledger row; unique(reference) makes double-settlement a no-op.
+  // If we lost a race to another settle() call, fetch what the winner inserted.
+  const finalOrder = order ?? (await db().select().from(tables.orders).where(eq(tables.orders.code, reference)).limit(1))[0];
+  if (!finalOrder) return { ok: false, message: 'Could not record the order — contact support with your reference.' };
+
   await db().insert(tables.payments).values({
-    orderId: order.id,
+    orderId: finalOrder.id,
     reference,
     amountKobo: data.amount,
     channel: data.channel,
