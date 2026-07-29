@@ -7,6 +7,7 @@ import type { CustomerSpec } from '@/lib/pricing';
 export function specToParams(spec: CustomerSpec, extra: Record<string, string> = {}): URLSearchParams {
   const p = new URLSearchParams();
   p.set('category', spec.category);
+  if (spec.variant) p.set('variant', spec.variant);
   if (spec.qty) p.set('qty', String(spec.qty));
   if (spec.width) p.set('w', String(spec.width));
   if (spec.height) p.set('h', String(spec.height));
@@ -34,6 +35,7 @@ export function specFromParams(sp: Params): CustomerSpec | null {
   const num = (k: string) => (one(sp[k]) ? Number(one(sp[k])) : undefined);
   return {
     category,
+    variant: one(sp.variant),
     qty: num('qty'),
     width: num('w'),
     height: num('h'),
@@ -48,14 +50,17 @@ export function specFromParams(sp: Params): CustomerSpec | null {
 }
 
 type SummarySpec = {
+  variant?: string;
   serviceType?: string; width?: number; height?: number; unit?: string;
   sizeLabel?: string; cover?: string; jSize?: string; sheets?: number;
   qty?: number; addons?: Record<string, string>;
 };
 
-export function specSummary(spec: SummarySpec): string[] {
+export function specSummary(spec: SummarySpec, variantLabel?: string): string[] {
   const out: string[] = [];
-  if (spec.serviceType) out.push(spec.serviceType === 'print_only' ? 'Print only (A4 sheets)' : 'Print + Cut');
+  // Prefer a human label where the caller has the category to hand; fall back to the slug.
+  if (variantLabel) out.push(variantLabel);
+  else if (spec.variant) out.push(spec.variant.replace(/_/g, ' '));
   if (spec.width && spec.height) out.push(`${spec.width} × ${spec.height} ${spec.unit}`);
   if (spec.sizeLabel) out.push(spec.sizeLabel);
   if (spec.cover) out.push(`${spec.cover}, ${spec.jSize}, ${spec.sheets} sheets`);

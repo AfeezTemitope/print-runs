@@ -62,16 +62,55 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
             <div className="border-b border-dashed border-black/15 py-2 text-black/60">Note: {order.printNote}</div>
           )}
           <div className="py-2 text-black/60">
-            {order.fulfillmentMethod === 'pickup' ? 'Self-pickup from shop' : `Delivery: ${order.deliveryAddress}`}
+            {order.fulfillmentMethod === 'collection'
+              ? 'You are arranging collection'
+              : `Delivery: ${order.deliveryAddress ?? '—'}`}
           </div>
         </dl>
+
+        {/* V2 3-layer pricing (decision 1). The customer sees the selling price and the
+            platform fee separately; the commercial margin inside the selling price is
+            deliberately not broken out. Delivery is NOT part of this total. */}
+        <dl className="font-mono text-sm">
+          {order.sellingPriceKobo != null && (
+            <div className="flex justify-between border-b border-dashed border-black/15 py-2">
+              <dt className="text-black/55">Product price</dt>
+              <dd className="font-bold text-navy">{naira(order.sellingPriceKobo)}</dd>
+            </div>
+          )}
+          {order.platformFeeKobo != null && (
+            <div className="flex justify-between border-b border-dashed border-black/15 py-2">
+              <dt className="text-black/55">Platform service fee</dt>
+              <dd className="font-bold text-navy">{naira(order.platformFeeKobo)}</dd>
+            </div>
+          )}
+        </dl>
         <div className="flex justify-between border-t border-dashed border-black/25 pt-3.5">
-          <span className="font-display font-extrabold text-navy">Total</span>
-          <span className="font-display text-lg font-extrabold text-navy">{naira(order.priceKobo)}</span>
+          <span className="font-display font-extrabold text-navy">Paid at checkout</span>
+          <span className="font-display text-lg font-extrabold text-navy">{naira(order.amountPaidKobo)}</span>
         </div>
+        {order.fulfillmentMethod === 'delivery' && order.deliveryFeeKobo == null && !order.isQuote && (
+          <p className="mt-3 rounded-xl bg-pale/40 px-4 py-3 text-[13px] leading-relaxed text-navy">
+            A PrintRuns representative will contact you to confirm your delivery details and the
+            delivery fee, which is charged separately from the amount above.
+          </p>
+        )}
+        {order.deliveryFeeKobo != null && (
+          <div className="mt-3 flex justify-between rounded-xl bg-pale/40 px-4 py-3 text-[13px] text-navy">
+            <span>Delivery fee (charged separately)</span>
+            <span className="font-display font-extrabold">{naira(order.deliveryFeeKobo)}</span>
+          </div>
+        )}
+        {order.refundStatus !== 'none' && (
+          <p className="mt-3 rounded-xl border border-red/30 bg-red/5 px-4 py-3 text-[13px] leading-relaxed text-red">
+            {order.refundStatus === 'requested'
+              ? 'A refund is being processed for this order. PrintRuns support will be in touch.'
+              : `Refund ${order.refundStatus}: ${naira(order.refundAmountKobo)}`}
+          </p>
+        )}
       </section>
 
-      {order.status === 'completed' && !existingReview && (
+      {order.status === 'delivered' && !existingReview && (
         <section className="mt-5 rounded-2xl border border-black/12 bg-white p-5 sm:p-6">
           <h2 className="font-display text-sm font-extrabold uppercase tracking-wide text-navy">Rate this printer</h2>
           <ReviewForm orderId={order.id} />

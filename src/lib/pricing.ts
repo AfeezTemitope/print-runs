@@ -6,6 +6,8 @@ type Addon = typeof productAddons.$inferSelect;
 
 export type CustomerSpec = {
   category: string;
+  /** V2: the chosen variant under this category (e.g. sticker 'round', card 'rounded'). */
+  variant?: string;
   qty?: number;
   width?: number;
   height?: number;

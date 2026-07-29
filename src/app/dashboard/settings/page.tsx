@@ -13,12 +13,13 @@ export default async function SettingsPage() {
       <SettingsForm initial={{
         businessName: shop.businessName,
         bio: shop.bio ?? '',
-        addressText: shop.addressText ?? '',
+        addressLine1: shop.addressLine1 ?? '',
+        addressLine2: shop.addressLine2 ?? '',
+        addressCity: shop.addressCity ?? '',
+        addressState: shop.addressState ?? '',
         openingHours: shop.openingHours ?? '',
         logoUrl: shop.logoUrl ?? '',
         bannerUrl: shop.bannerUrl ?? '',
-        supportsPickup: shop.supportsPickup,
-        supportsDelivery: shop.supportsDelivery,
         hasLocation: shop.lat != null,
       }} />
     </div>

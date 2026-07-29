@@ -206,6 +206,7 @@ export const productAddons = pgTable('product_addons', {
 
 export type OrderSpec = {
   category: string;
+  variant?: string;         // V2: chosen variant under the category
   qty?: number;
   width?: number;
   height?: number;

@@ -15,6 +15,13 @@
       "when": 1785312672308,
       "tag": "0001_v2_batch1_foundation",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785337659713,
+      "tag": "0002_v2_batch2_products",
+      "breakpoints": true
     }
   ]
 }

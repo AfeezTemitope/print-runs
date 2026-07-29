@@ -33,8 +33,6 @@ export default async function EditProductPage({ params }: { params: Promise<{ id
         areaUnit: p.areaUnit,
         ratePerUnit: fromKobo(p.ratePerUnitKobo),
         minCharge: fromKobo(p.minChargeKobo),
-        perSheet: fromKobo(p.perSheetKobo),
-        cardsPerSheet: p.cardsPerSheet ? String(p.cardsPerSheet) : '10',
         turnaroundHours: String(p.turnaroundHours),
         photoUrl: p.photoUrl ?? '',
         tiers: p.pricingMode === 'matrix' ? [] : variants.map((v) => ({

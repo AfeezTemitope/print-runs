@@ -14,8 +14,6 @@ export type ProductPayload = {
   areaUnit: string | null;
   ratePerUnit: string;
   minCharge: string;
-  perSheet: string;
-  cardsPerSheet: string;
   turnaroundHours: string;
   photoUrl: string;
   tiers: { qty: string; price: string; label: string }[];
@@ -24,7 +22,8 @@ export type ProductPayload = {
 };
 
 const toKobo = (naira: string) => Math.round(Number(naira || 0) * 100);
-const MODES = ['per_area', 'per_sheet', 'tier', 'fixed_size', 'matrix', 'quote'] as const;
+// V2: 'per_sheet' (Business Card Print-Only) removed entirely — decision 8.
+const MODES = ['per_area', 'tier', 'fixed_size', 'matrix', 'quote'] as const;
 const KINDS = ['lamination', 'gsm', 'corner', 'sides'] as const;
 const BASES = ['per_sheet', 'per_piece', 'flat'] as const;
 
@@ -37,9 +36,6 @@ export async function saveProduct(p: ProductPayload) {
   const mode = MODES.includes(p.pricingMode as (typeof MODES)[number]) ? p.pricingMode as (typeof MODES)[number] : 'quote';
 
   if (mode === 'per_area' && toKobo(p.ratePerUnit) <= 0) return { error: 'Set a rate for per-area pricing.' };
-  if (mode === 'per_sheet' && (toKobo(p.perSheet) <= 0 || Number(p.cardsPerSheet) <= 0)) {
-    return { error: 'Set the sheet price and cards-per-sheet.' };
-  }
 
   const tiers = p.tiers
     .filter((t) => Number(t.qty) > 0 && toKobo(t.price) > 0)
@@ -78,8 +74,6 @@ export async function saveProduct(p: ProductPayload) {
     areaUnit: mode === 'per_area' ? (p.areaUnit === 'sqin' ? 'sqin' as const : 'sqft' as const) : null,
     ratePerUnitKobo: mode === 'per_area' ? toKobo(p.ratePerUnit) : null,
     minChargeKobo: mode === 'per_area' && toKobo(p.minCharge) > 0 ? toKobo(p.minCharge) : null,
-    perSheetKobo: mode === 'per_sheet' ? toKobo(p.perSheet) : null,
-    cardsPerSheet: mode === 'per_sheet' ? Number(p.cardsPerSheet) : null,
     turnaroundHours: Math.max(1, Number(p.turnaroundHours) || 24),
     photoUrl: p.photoUrl || null,
   };

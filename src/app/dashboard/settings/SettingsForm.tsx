@@ -7,8 +7,9 @@ import { Field, Input, Textarea } from '@/components/ui/Field';
 import { saveSettings } from './actions';
 
 type Initial = {
-  businessName: string; bio: string; addressText: string; openingHours: string;
-  logoUrl: string; bannerUrl: string; supportsPickup: boolean; supportsDelivery: boolean; hasLocation: boolean;
+  businessName: string; bio: string; openingHours: string;
+  addressLine1: string; addressLine2: string; addressCity: string; addressState: string;
+  logoUrl: string; bannerUrl: string; hasLocation: boolean;
 };
 
 export function SettingsForm({ initial }: { initial: Initial }) {
@@ -42,7 +43,13 @@ export function SettingsForm({ initial }: { initial: Initial }) {
     <div className="max-w-xl space-y-4">
       <Field label="Business name"><Input value={form.businessName} onChange={set('businessName')} /></Field>
       <Field label="Bio"><Textarea rows={3} value={form.bio} onChange={set('bio')} placeholder="What you print best, since when…" /></Field>
-      <Field label="Address"><Input value={form.addressText} onChange={set('addressText')} /></Field>
+      {/* V2: address split into 4 fields (Batch 1 foundation). */}
+      <Field label="Address line 1"><Input value={form.addressLine1} onChange={set('addressLine1')} placeholder="e.g. 12 Bode Thomas Street" /></Field>
+      <Field label="Address line 2" hint="Optional — landmark, floor, unit."><Input value={form.addressLine2} onChange={set('addressLine2')} /></Field>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="City"><Input value={form.addressCity} onChange={set('addressCity')} placeholder="e.g. Surulere" /></Field>
+        <Field label="State"><Input value={form.addressState} onChange={set('addressState')} placeholder="e.g. Lagos" /></Field>
+      </div>
       <div className="flex items-center gap-3">
         <Button type="button" variant="tertiary" size="sm" onClick={locate} disabled={locating}>
           <LocateFixed className="size-4" />
@@ -57,18 +64,15 @@ export function SettingsForm({ initial }: { initial: Initial }) {
         <Field label="Logo URL"><Input value={form.logoUrl} onChange={set('logoUrl')} placeholder="https://…" /></Field>
         <Field label="Banner URL"><Input value={form.bannerUrl} onChange={set('bannerUrl')} placeholder="https://…" /></Field>
       </div>
-      <div className="flex flex-wrap gap-5 rounded-2xl border border-black/12 bg-pale/25 p-4">
-        <label className="inline-flex items-center gap-2 font-display text-[13px] font-bold text-navy">
-          <input type="checkbox" className="size-4 accent-blue" checked={form.supportsDelivery}
-            onChange={(e) => setForm((f) => ({ ...f, supportsDelivery: e.target.checked }))} />
-          I deliver (riders)
-        </label>
-        <label className="inline-flex items-center gap-2 font-display text-[13px] font-bold text-navy">
-          <input type="checkbox" className="size-4 accent-blue" checked={form.supportsPickup}
-            onChange={(e) => setForm((f) => ({ ...f, supportsPickup: e.target.checked }))} />
-          Customers can self-pickup
-        </label>
-      </div>
+      {/* V2: the delivery/pickup toggles are gone. Every order is delivered using your own
+          dispatch arrangements. Where a customer declines the delivery fee, PrintRuns may
+          arrange collection with you directly — it is never a customer-facing option. */}
+      <p className="rounded-2xl border border-black/12 bg-pale/25 p-4 text-[13px] leading-relaxed text-navy">
+        <span className="font-bold">Delivery:</span> all orders are delivered using your own
+        dispatch rider. PrintRuns confirms the delivery fee with the customer after payment. If a
+        customer arranges their own rider instead, PrintRuns will confirm who is authorised to
+        collect before you release the job.
+      </p>
       {msg && <p className={`text-sm ${msg === 'Saved.' ? 'text-success' : 'text-red'}`}>{msg}</p>}
       <Button onClick={save} disabled={pending}>{pending ? 'Saving…' : 'Save settings'}</Button>
     </div>

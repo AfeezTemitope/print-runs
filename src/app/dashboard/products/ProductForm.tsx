@@ -13,7 +13,7 @@ import { saveProduct, type ProductPayload } from './actions';
  *  Per ft/sq.ft — rate (+ min charge)
  *  Quantity tier — repeatable qty/price/label rows
  *  Request quote — nothing to price
- * Plus per_sheet (business card Print-only), fixed sizes (frames) and the
+ * Plus fixed sizes (frames) and the
  * jotter matrix. Add-ons are one shared component priced per option (§6).
  */
 
@@ -29,8 +29,6 @@ export type InitialProduct = {
   areaUnit: string | null;
   ratePerUnit: string;   // naira strings in the form; kobo in the DB
   minCharge: string;
-  perSheet: string;
-  cardsPerSheet: string;
   turnaroundHours: string;
   photoUrl: string;
   tiers: TierRow[];
@@ -54,7 +52,6 @@ const MODES_BY_CATEGORY: Record<string, { value: string; label: string; hint: st
   ],
   business_card: [
     { value: 'tier', label: 'Print + Cut — quantity tiers', hint: 'Finished cards' },
-    { value: 'per_sheet', label: 'Print only — per A4 sheet', hint: 'Customer cuts the cards themselves' },
     { value: 'quote', label: 'Request quote', hint: 'No price shown' },
   ],
   nylon: [
@@ -85,8 +82,6 @@ export function ProductForm({ initial }: { initial: InitialProduct }) {
   const [areaUnit, setAreaUnit] = useState(initial.areaUnit ?? 'sqft');
   const [rate, setRate] = useState(initial.ratePerUnit);
   const [minCharge, setMinCharge] = useState(initial.minCharge);
-  const [perSheet, setPerSheet] = useState(initial.perSheet);
-  const [cardsPerSheet, setCardsPerSheet] = useState(initial.cardsPerSheet || '10');
   const [turnaround, setTurnaround] = useState(initial.turnaroundHours || '24');
   const [photoUrl, setPhotoUrl] = useState(initial.photoUrl);
   const [tiers, setTiers] = useState<TierRow[]>(initial.tiers.length ? initial.tiers : [{ qty: '100', price: '', label: '' }]);
@@ -117,8 +112,6 @@ export function ProductForm({ initial }: { initial: InitialProduct }) {
       areaUnit: validMode === 'per_area' ? areaUnit : null,
       ratePerUnit: rate,
       minCharge,
-      perSheet,
-      cardsPerSheet,
       turnaroundHours: turnaround,
       photoUrl: photoUrl.trim(),
       tiers: validMode === 'tier'
@@ -186,15 +179,6 @@ export function ProductForm({ initial }: { initial: InitialProduct }) {
             </Select>
           </Field>
           <Field label="Minimum charge" hint="Optional floor per piece">{priceInput(minCharge, setMinCharge)}</Field>
-        </div>
-      )}
-
-      {validMode === 'per_sheet' && (
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Price per A4 sheet">{priceInput(perSheet, setPerSheet, '1500')}</Field>
-          <Field label="Cards per sheet" hint="Used to auto-calculate sheets from quantity">
-            <Input inputMode="numeric" value={cardsPerSheet} onChange={(e) => setCardsPerSheet(e.target.value.replace(/\D/g, ''))} />
-          </Field>
         </div>
       )}
 
@@ -299,7 +283,7 @@ export function ProductForm({ initial }: { initial: InitialProduct }) {
             ))}
           </div>
           <Button variant="tertiary" size="sm" className="mt-2.5"
-            onClick={() => setAddons([...addons, { kind: addonKinds[0].kind, label: addonKinds[0].options[0], basis: validMode === 'per_sheet' ? 'per_sheet' : 'per_piece', price: '' }])}>
+            onClick={() => setAddons([...addons, { kind: addonKinds[0].kind, label: addonKinds[0].options[0], basis: 'per_piece', price: '' }])}>
             <Plus className="size-4" /> Price an add-on
           </Button>
         </div>

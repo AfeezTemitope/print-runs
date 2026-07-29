@@ -3,6 +3,8 @@
    numbers the founder decisions specify, not just that it type-checks. */
 
 import { computeMargin, computeOrderTotals, computePrice, DEFAULT_PLATFORM_FEE_KOBO } from '../src/lib/pricing';
+import { stepsFor, statusLabel, canDecline, isSettlementEligible, QUEUE_STATUSES } from '../src/lib/status';
+import { CATEGORIES, LIVE_CATEGORIES, getCategory, getVariant, sizeConfigFor } from '../src/lib/categories';
 
 let pass = 0;
 let fail = 0;
@@ -85,6 +87,63 @@ eq('tier pricing still works', tierResult.ok && tierResult.totalKobo, N(8000));
 
 const quoteResult = computePrice({ category: 'business_card', qty: 999 }, tierProduct, variants, []);
 eq('unpriced qty falls back to quote', quoteResult.ok, false);
+
+console.log('\nOrder lifecycle (decision 18)');
+eq('delivery path has 7 stages', stepsFor('delivery').length, 7);
+// Collection skips out_for_delivery — PrintRuns isn't the one delivering it.
+eq('collection path has 6 stages', stepsFor('collection').length, 6);
+eq('collection path excludes out_for_delivery', stepsFor('collection').includes('out_for_delivery'), false);
+eq('collection final stage reads Collected', statusLabel('delivered', 'collection'), 'Collected');
+eq('delivery final stage reads Delivered', statusLabel('delivered', 'delivery'), 'Delivered');
+eq('collection ready stage is explicit', statusLabel('ready_for_dispatch', 'collection'), 'Ready for collection');
+
+console.log('\nPrinter decline window (decision 10)');
+eq('can decline before work starts', canDecline('order_received'), true);
+eq('can decline once assigned', canDecline('printer_assigned'), true);
+// Once materials are committed the Refund Policy treats it as non-cancellable.
+eq('cannot decline mid-print', canDecline('printing_in_progress'), false);
+eq('cannot decline once printed', canDecline('printing_completed'), false);
+eq('terminal states are not in the live queue', QUEUE_STATUSES.includes('delivered'), false);
+eq('cancelled is not in the live queue', QUEUE_STATUSES.includes('cancelled'), false);
+
+console.log('\nSettlement entitlement (decision 20)');
+// The whole point: a slow-to-collect customer must not hold a printer's money.
+eq('collection settles once ready + notified', isSettlementEligible('ready_for_dispatch', 'collection'), true);
+eq('delivery does NOT settle merely on ready', isSettlementEligible('ready_for_dispatch', 'delivery'), false);
+eq('delivery settles on delivered', isSettlementEligible('delivered', 'delivery'), true);
+eq('nothing settles mid-print', isSettlementEligible('printing_in_progress', 'delivery'), false);
+
+console.log('\nCategories and variants (Batch 2)');
+eq('exactly 8 live categories', LIVE_CATEGORIES.length, 8);
+eq('live slugs are the agreed eight', LIVE_CATEGORIES.map((c) => c.slug), [
+  'banner', 'jotter', 'flyer', 'business_card', 'sticker', 'nylon', 'thank_you_card', 'id_card',
+]);
+// Frame is locked and Paper Bag is unspecced — neither may reach a customer.
+eq('frame is not live', getCategory('frame')?.live, false);
+eq('paper_bag is not live', getCategory('paper_bag')?.live, false);
+eq('frame absent from live list', LIVE_CATEGORIES.some((c) => c.slug === 'frame'), false);
+
+// Sticker is THREE variants — the Master Build Spec, not the founder doc's two (28 Jul).
+eq('sticker has 3 variants', getCategory('sticker')?.variants?.length, 3);
+eq('sticker variants', getCategory('sticker')?.variants?.map((v) => v.slug), ['round', 'straight', 'large_format']);
+eq('business card has 2 listings', getCategory('business_card')?.variants?.length, 2);
+eq('nylon is polybag only', getCategory('nylon')?.variants?.map((v) => v.slug), ['polybag']);
+eq('jotter has soft + hard cover', getCategory('jotter')?.variants?.length, 2);
+eq('id card has 2 variants', getCategory('id_card')?.variants?.length, 2);
+
+// Jotter sheet counts migrated 40/60/80 -> 50/75/100.
+eq('jotter sheets are the new values', getCategory('jotter')?.jotter?.sheets, [50, 75, 100]);
+
+// Large Format stickers override the category's inch presets with foot-scale ones.
+const sticker = getCategory('sticker')!;
+eq('default sticker sizes are inches', sizeConfigFor(sticker, 'round')?.defaultUnit, 'in');
+eq('large format overrides to feet', sizeConfigFor(sticker, 'large_format')?.defaultUnit, 'ft');
+eq('unknown variant falls back to category', sizeConfigFor(sticker, 'nonsense')?.defaultUnit, 'in');
+eq('getVariant rejects unknown slugs', getVariant(sticker, 'nonsense'), undefined);
+
+// Every live category must be reachable and priceable.
+eq('all live categories have a name', LIVE_CATEGORIES.every((c) => c.name.length > 0), true);
+eq('no duplicate slugs', new Set(CATEGORIES.map((c) => c.slug)).size, CATEGORIES.length);
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail === 0 ? 0 : 1);

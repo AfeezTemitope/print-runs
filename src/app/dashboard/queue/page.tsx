@@ -5,22 +5,22 @@ import { getMyShop } from '@/lib/auth';
 import { getCategory } from '@/lib/categories';
 import { specSummary } from '@/lib/spec';
 import { naira } from '@/lib/format';
+import { QUEUE_STATUSES, statusLabel } from '@/lib/status';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { QueueActions } from './QueueActions';
 
 export const metadata: Metadata = { title: 'Job queue' };
 
 /**
- * Screen 4 + §4.1 (spec): numbered jobs, three buttons.
- * Paid orders arrive here as 'printing'; Button 2 flips to 'ready';
- * Button 3 (Dispatch / Notify — adapts to fulfillment_method) completes,
- * and stays locked until Button 2 has been pressed.
+ * V2 job queue. Orders now walk 7 stages (decision 18) rather than 3, so the card shows the
+ * current stage and QueueActions exposes exactly one valid next step. Self-pickup is gone;
+ * a Collection order means the customer is sending their own rider (28 Jul decision).
  */
 export default async function QueuePage() {
   const shop = (await getMyShop())!;
   const jobs = await db().select().from(tables.orders).where(and(
     eq(tables.orders.shopId, shop.id),
-    inArray(tables.orders.status, ['printing', 'ready']),
+    inArray(tables.orders.status, QUEUE_STATUSES),
   )).orderBy(asc(tables.orders.createdAt));
 
   return (
@@ -53,11 +53,24 @@ export default async function QueuePage() {
                       </p>
                     )}
                     <p className="mt-1.5 text-xs text-black/50">
-                      {job.fulfillmentMethod === 'pickup' ? 'Self-pickup' : `Deliver to: ${job.deliveryAddress}`}
+                      {job.fulfillmentMethod === 'collection'
+                        ? 'Customer is collecting — do not dispatch'
+                        : `Deliver to: ${job.deliveryAddress ?? '—'}`}
+                    </p>
+                    <p className="mt-1 text-xs text-black/50">
+                      {job.contactPhonePrimary ?? '—'}
+                      {job.contactPhoneSecondary ? ` · ${job.contactPhoneSecondary}` : ''}
                     </p>
                   </div>
                 </div>
-                <span className="font-display font-extrabold text-navy">{naira(job.priceKobo)}</span>
+                <div className="text-right">
+                  {/* The printer sees THEIR price — never the customer's selling price, which
+                      includes PrintRuns' commercial margin and is deliberately invisible here. */}
+                  <span className="block font-display font-extrabold text-navy">{naira(job.printerBaseKobo)}</span>
+                  <span className="mt-0.5 block font-mono text-[10px] uppercase tracking-widest text-blue">
+                    {statusLabel(job.status, job.fulfillmentMethod)}
+                  </span>
+                </div>
               </div>
               <div className="mt-4 border-t border-dashed border-black/25 pt-4">
                 <QueueActions
@@ -65,6 +78,8 @@ export default async function QueuePage() {
                   status={job.status}
                   method={job.fulfillmentMethod}
                   fileUrl={job.designFileUrl}
+                  collectorName={job.collectionAuthorizedName}
+                  collectorPhone={job.collectionAuthorizedPhone}
                 />
               </div>
             </li>

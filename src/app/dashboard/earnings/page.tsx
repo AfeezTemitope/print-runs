@@ -6,15 +6,24 @@ import { getMyShop } from '@/lib/auth';
 import { getCategory } from '@/lib/categories';
 import { naira, shortDate } from '@/lib/format';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { isSettlementEligible } from '@/lib/status';
 
 export const metadata: Metadata = { title: 'Earnings' };
 
-/** Screen 6 (spec §4): pricing quick-edit + payment history. Payouts proper come with Multi-Split. */
+/**
+ * V2 earnings. Two changes that matter:
+ *  1. A printer sees THEIR OWN base price (printerBaseKobo), never the customer's selling
+ *     price — the commercial margin on top is PrintRuns' and is invisible here (decision 1).
+ *  2. Settlement is split into "earned" vs "awaiting handover" (decision 20): entitlement is
+ *     triggered by confirmed handover, and for a Collection order it starts once the job is
+ *     ready and the customer has been notified — a slow-to-collect customer must not hold a
+ *     printer's money. Payout itself is still an ops action; nothing here moves money.
+ */
 export default async function EarningsPage() {
   const shop = (await getMyShop())!;
 
   const [totals, paid, prods] = await Promise.all([
-    db().select({ s: sum(tables.orders.priceKobo), c: count() }).from(tables.orders).where(and(
+    db().select({ s: sum(tables.orders.printerBaseKobo), c: count() }).from(tables.orders).where(and(
       eq(tables.orders.shopId, shop.id),
       eq(tables.orders.paymentStatus, 'paid'),
     )),
@@ -25,14 +34,30 @@ export default async function EarningsPage() {
     db().select().from(tables.products).where(eq(tables.products.shopId, shop.id)),
   ]);
 
+  // Split what's actually earned from what's still waiting on handover.
+  const earnedKobo = paid
+    .filter((o) => isSettlementEligible(o.status, o.fulfillmentMethod))
+    .reduce((t, o) => t + (o.printerBaseKobo ?? 0), 0);
+  const awaitingKobo = paid
+    .filter((o) => !isSettlementEligible(o.status, o.fulfillmentMethod) && o.status !== 'cancelled')
+    .reduce((t, o) => t + (o.printerBaseKobo ?? 0), 0);
+
   return (
     <div>
       <h1 className="font-display text-3xl font-extrabold tracking-tight text-black">Earnings</h1>
 
-      <div className="mt-6 grid grid-cols-2 gap-3.5">
+      <div className="mt-6 grid grid-cols-2 gap-3.5 lg:grid-cols-4">
         <div className="rounded-2xl bg-navy p-5 text-white">
-          <p className="font-mono text-[10px] font-bold uppercase tracking-widest text-white/55">Total collected</p>
-          <p className="mt-1.5 font-display text-2xl font-extrabold text-pale">{naira(Number(totals[0].s ?? 0))}</p>
+          <p className="font-mono text-[10px] font-bold uppercase tracking-widest text-white/55">Earned</p>
+          <p className="mt-1.5 font-display text-2xl font-extrabold text-pale">{naira(earnedKobo)}</p>
+        </div>
+        <div className="rounded-2xl border border-black/12 bg-white p-5">
+          <p className="font-mono text-[10px] font-bold uppercase tracking-widest text-black/45">Awaiting handover</p>
+          <p className="mt-1.5 font-display text-2xl font-extrabold text-navy">{naira(awaitingKobo)}</p>
+        </div>
+        <div className="rounded-2xl border border-black/12 bg-white p-5">
+          <p className="font-mono text-[10px] font-bold uppercase tracking-widest text-black/45">Lifetime</p>
+          <p className="mt-1.5 font-display text-2xl font-extrabold text-navy">{naira(Number(totals[0].s ?? 0))}</p>
         </div>
         <div className="rounded-2xl border border-black/12 bg-white p-5">
           <p className="font-mono text-[10px] font-bold uppercase tracking-widest text-black/45">Paid orders</p>
@@ -40,7 +65,8 @@ export default async function EarningsPage() {
         </div>
       </div>
       <p className="mt-2.5 text-xs text-black/45">
-        Automatic payouts (Paystack split) are on the roadmap — for now this shows what customers have paid.
+        These are your prices. PrintRuns adds its own margin and service fee on top, which the
+        customer pays and which is not shown here. Payouts are processed by PrintRuns operations.
       </p>
 
       <h2 className="mt-8 font-display text-lg font-extrabold text-navy">Your prices</h2>
@@ -64,7 +90,12 @@ export default async function EarningsPage() {
               <span className="text-sm text-black/60">
                 <span className="font-mono font-bold text-navy">{o.code}</span> · {getCategory(o.spec.category)?.name} · {shortDate(o.createdAt)}
               </span>
-              <span className="font-display text-sm font-extrabold text-success">+{naira(o.priceKobo)}</span>
+              <span className="text-right">
+                <span className="block font-display text-sm font-extrabold text-success">+{naira(o.printerBaseKobo)}</span>
+                {!isSettlementEligible(o.status, o.fulfillmentMethod) && o.status !== 'cancelled' && (
+                  <span className="font-mono text-[9px] uppercase tracking-widest text-black/40">awaiting handover</span>
+                )}
+              </span>
             </li>
           ))}
         </ul>
