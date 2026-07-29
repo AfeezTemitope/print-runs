@@ -4,7 +4,7 @@ import { and, eq, gte, lte, inArray } from 'drizzle-orm';
 import { MapPin, Star, Clock } from 'lucide-react';
 import { db, tables } from '@/db';
 import { getCategory } from '@/lib/categories';
-import { computePrice, productMatchesSpec } from '@/lib/pricing';
+import { computePrice, productMatchesSpec, computeMargin, getPlatformFeeKobo } from '@/lib/pricing';
 import { specFromParams } from '@/lib/spec';
 import { distanceKm, bbox, LAGOS } from '@/lib/geo';
 import { naira } from '@/lib/format';
@@ -69,16 +69,33 @@ export default async function PrintersPage({ searchParams }: { searchParams: Pro
       ])
     : [[], []];
 
+  // The ₦500 platform service fee is shown at checkout, not folded into the card price —
+  // but we surface it here as a note so the checkout total isn't a surprise.
+  const platformFeeKobo = await getPlatformFeeKobo((key) =>
+    db().select().from(tables.platformSettings).where(eq(tables.platformSettings.key, key)).limit(1)
+      .then((rows) => rows[0]),
+  );
+
   const cards = shops.flatMap((shop) => {
     const candidates = prods.filter((p) => p.shopId === shop.id && productMatchesSpec(spec, p));
     if (!candidates.length) return [];
     // Best quotable price wins; otherwise the shop shows as Request Quote.
-    let best: { productId: string; totalKobo: number; turnaround: number } | null = null;
+    //
+    // V2: the customer must see the SELLING price (printer base + PrintRuns' commercial
+    // margin), not the printer's raw price — otherwise the margin would appear as a
+    // surprise increase at checkout. The margin itself stays invisible (decision 1).
+    // Cheapest is compared on selling price too, since margins differ per product
+    // (Business Card is a percentage, everything else is a fixed amount), so the cheapest
+    // base price is not necessarily the cheapest price to the customer.
+    let best: { productId: string; sellingKobo: number; turnaround: number } | null = null;
     let quoteProduct = candidates[0];
     for (const p of candidates) {
       const r = computePrice(spec, p, variants.filter((v) => v.productId === p.id), addons.filter((a) => a.productId === p.id));
-      if (r.ok && (!best || r.totalKobo < best.totalKobo)) {
-        best = { productId: p.id, totalKobo: r.totalKobo, turnaround: p.turnaroundHours };
+      if (r.ok) {
+        const sellingKobo = r.totalKobo + computeMargin(r.totalKobo, spec.qty ?? 1, p);
+        if (!best || sellingKobo < best.sellingKobo) {
+          best = { productId: p.id, sellingKobo, turnaround: p.turnaroundHours };
+        }
       }
       if (p.pricingMode === 'quote') quoteProduct = p;
     }
@@ -132,14 +149,16 @@ export default async function PrintersPage({ searchParams }: { searchParams: Pro
                         <span className="font-mono text-[10px] uppercase tracking-widest">New printer</span>
                       )}
                       {best && <span className="flex items-center gap-1"><Clock className="size-3.5" />~{best.turnaround}hrs</span>}
-                      {shop.supportsPickup && <span className="rounded-pill bg-pale px-2 py-0.5 font-mono text-[9px] font-bold uppercase tracking-wider text-navy">Pickup available</span>}
+
                     </p>
                   </div>
                   <div className="text-right">
                     {best ? (
                       <>
-                        <p className="font-display text-2xl font-extrabold text-navy">{naira(best.totalKobo)}</p>
-                        <p className="font-mono text-[10px] uppercase tracking-widest text-black/45">for this spec</p>
+                        <p className="font-display text-2xl font-extrabold text-navy">{naira(best.sellingKobo)}</p>
+                        <p className="font-mono text-[10px] uppercase tracking-widest text-black/45">
+                          + {naira(platformFeeKobo)} service fee
+                        </p>
                       </>
                     ) : (
                       <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-navy/60">No fixed price<br />for this spec</p>

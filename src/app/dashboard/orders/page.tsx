@@ -6,10 +6,35 @@ import { getMyShop } from '@/lib/auth';
 import { getCategory } from '@/lib/categories';
 import { naira, shortDate } from '@/lib/format';
 import { EmptyState } from '@/components/ui/EmptyState';
+import type { OrderStatus } from '@/lib/status';
+import { statusLabel } from '@/lib/status';
 
 export const metadata: Metadata = { title: 'Orders' };
 
-const FILTERS = ['all', 'placed', 'printing', 'ready', 'completed', 'cancelled'] as const;
+// V2: 7 stages (decision 18). 'all' plus each real status.
+const FILTERS = [
+  'all',
+  'order_received',
+  'printer_assigned',
+  'printing_in_progress',
+  'printing_completed',
+  'ready_for_dispatch',
+  'out_for_delivery',
+  'delivered',
+  'cancelled',
+] as const;
+
+const FILTER_LABEL: Record<string, string> = {
+  all: 'all',
+  order_received: 'received',
+  printer_assigned: 'assigned',
+  printing_in_progress: 'printing',
+  printing_completed: 'printed',
+  ready_for_dispatch: 'ready',
+  out_for_delivery: 'out',
+  delivered: 'delivered',
+  cancelled: 'cancelled',
+};
 
 /** Screen 5 (spec §4): the full order list, filterable by status. */
 export default async function ShopOrdersPage({ searchParams }: { searchParams: Promise<{ status?: string }> }) {
@@ -20,7 +45,7 @@ export default async function ShopOrdersPage({ searchParams }: { searchParams: P
   const rows = await db().select().from(tables.orders)
     .where(filter === 'all'
       ? eq(tables.orders.shopId, shop.id)
-      : and(eq(tables.orders.shopId, shop.id), eq(tables.orders.status, filter as 'placed')))
+      : and(eq(tables.orders.shopId, shop.id), eq(tables.orders.status, filter as OrderStatus)))
     .orderBy(desc(tables.orders.createdAt))
     .limit(100);
 
@@ -37,7 +62,7 @@ export default async function ShopOrdersPage({ searchParams }: { searchParams: P
               filter === f ? 'bg-navy text-white' : 'border border-black/20 text-navy hover:border-black/45'
             }`}
           >
-            {f}
+            {FILTER_LABEL[f]}
           </Link>
         ))}
       </div>
@@ -56,11 +81,15 @@ export default async function ShopOrdersPage({ searchParams }: { searchParams: P
                     <span className="ml-2 rounded-pill bg-pale px-2 py-0.5 font-mono text-[9px] font-bold uppercase tracking-wider text-navy">quote request</span>
                   )}
                 </p>
-                <p className="text-xs text-black/50">{shortDate(o.createdAt)} · {o.fulfillmentMethod} · payment {o.paymentStatus}</p>
+                <p className="text-xs text-black/50">
+                  {shortDate(o.createdAt)} · {o.fulfillmentMethod === 'collection' ? 'collection' : 'delivery'} · payment {o.paymentStatus}
+                </p>
               </div>
               <div className="flex items-center gap-3">
-                <span className="font-mono text-[10px] font-bold uppercase tracking-widest text-navy/60">{o.status}</span>
-                <span className="font-display text-sm font-extrabold text-navy">{naira(o.priceKobo)}</span>
+                <span className="font-mono text-[10px] font-bold uppercase tracking-widest text-navy/60">
+                  {statusLabel(o.status, o.fulfillmentMethod)}
+                </span>
+                <span className="font-display text-sm font-extrabold text-navy">{naira(o.printerBaseKobo)}</span>
               </div>
             </li>
           ))}

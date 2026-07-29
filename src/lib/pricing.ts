@@ -6,12 +6,14 @@ type Addon = typeof productAddons.$inferSelect;
 
 export type CustomerSpec = {
   category: string;
+  /** V2: the chosen variant under this category (e.g. sticker 'round', card 'rounded'). */
+  variant?: string;
   qty?: number;
   width?: number;
   height?: number;
   unit?: 'ft' | 'in' | 'cm';
   sizeLabel?: string;                 // frames
-  serviceType?: 'print_only' | 'print_cut'; // business cards
+  serviceType?: string;               // reserved — Business Card's dual print_only/print_cut path is retired (decision 8)
   cover?: string;                     // jotter
   jSize?: string;                     // jotter size
   sheets?: number;                    // jotter
@@ -81,22 +83,6 @@ export function computePrice(spec: CustomerSpec, product: Product, variants: Var
       return { ok: true, totalKobo: lines.reduce((s, l) => s + l.amountKobo, 0), lines };
     }
 
-    case 'per_sheet': {
-      // Business card "Print only": customer cuts. sheets = ceil(qty / cardsPerSheet). (spec §6)
-      if (!product.perSheetKobo || !product.cardsPerSheet) return { ok: false, reason: 'No sheet rate set' };
-      const sheets = Math.ceil(qty / product.cardsPerSheet);
-      const lines: PriceLine[] = [{
-        label: `${qty} cards → ${sheets} A4 sheet${sheets > 1 ? 's' : ''}`,
-        amountKobo: sheets * product.perSheetKobo,
-      }];
-      // Lamination priced per sheet here; ignore per-piece-only axes (corners are a cut concern).
-      const picked = spec.addons ? { lamination: spec.addons.lamination ?? 'None' } : undefined;
-      const extra = addonCost(addons, picked, { per_piece: qty, per_sheet: sheets });
-      if (extra.missing) return { ok: false, reason: `${extra.missing} not priced` };
-      lines.push(...extra.lines);
-      return { ok: true, totalKobo: lines.reduce((s, l) => s + l.amountKobo, 0), lines };
-    }
-
     case 'tier': {
       const tier = variants.find((v) => v.qty === qty);
       if (!tier) return { ok: false, reason: `No ${qty}pc tier` };
@@ -136,12 +122,79 @@ export function computePrice(spec: CustomerSpec, product: Product, variants: Var
   }
 }
 
-/** Business cards run two paths (spec §6): match products to the chosen path. */
+/**
+ * V2: Business Card's Print-Only / Print+Cut dual path is retired (decision 8) — every
+ * Business Card product is priced the same way now, so this only checks category anymore.
+ * Kept as a named function since Batch 2's per-listing (Standard/Rounded) matching will
+ * likely extend it again.
+ */
 export function productMatchesSpec(spec: CustomerSpec, product: Product): boolean {
-  if (product.categorySlug !== spec.category) return false;
-  if (spec.category === 'business_card') {
-    if (spec.serviceType === 'print_only') return product.pricingMode === 'per_sheet' || product.pricingMode === 'quote';
-    if (spec.serviceType === 'print_cut') return product.pricingMode === 'tier' || product.pricingMode === 'quote';
+  return product.categorySlug === spec.category;
+}
+
+/**
+ * V2 pricing engine (decision 1): Printer Base Price + Commercial Margin = Selling Price;
+ * then + Platform Service Fee = amount the customer pays at checkout. Delivery is NOT part
+ * of this — it's quoted manually after payment (decision 13/B1).
+ *
+ * computePrice() above still does exactly one job: work out the Printer Base Price from a
+ * printer's own rates/tiers/add-ons. Everything below layers on top of that result and never
+ * touches printer pricing data — this is deliberate, so a printer's own numbers are never
+ * mixed with PrintRuns' commercial margin in one place.
+ */
+
+export type MarginableProduct = Pick<Product, 'marginType' | 'marginFixedKobo' | 'marginPercentBps'>;
+
+/**
+ * 'fixed' margins are per unit (decision 16: ID Card is ₦200/piece; other fixed-margin
+ * categories are ₦10–50/piece), so they scale with qty. 'percent' (Business Card only,
+ * decision 23: 7%) applies to the whole Printer Base Price for the line — scaling by qty
+ * happens automatically since printerBaseKobo already reflects the full line total.
+ */
+export function computeMargin(printerBaseKobo: number, qty: number, product: MarginableProduct): number {
+  if (product.marginType === 'percent') {
+    return Math.round((printerBaseKobo * product.marginPercentBps) / 10000);
   }
-  return true;
+  return product.marginFixedKobo * Math.max(1, qty);
+}
+
+export type OrderTotals = {
+  printerBaseKobo: number;
+  marginKobo: number;
+  sellingPriceKobo: number;   // shown to the customer as the product price
+  platformFeeKobo: number;    // shown to the customer, separately, at checkout
+  amountPaidKobo: number;     // sellingPriceKobo + platformFeeKobo — the checkout charge
+};
+
+/** Pure and synchronous by design — callers fetch platformFeeKobo from platform_settings first. */
+export function computeOrderTotals(
+  printerBaseKobo: number,
+  qty: number,
+  product: MarginableProduct,
+  platformFeeKobo: number,
+): OrderTotals {
+  const marginKobo = computeMargin(printerBaseKobo, qty, product);
+  const sellingPriceKobo = printerBaseKobo + marginKobo;
+  return {
+    printerBaseKobo,
+    marginKobo,
+    sellingPriceKobo,
+    platformFeeKobo,
+    amountPaidKobo: sellingPriceKobo + platformFeeKobo,
+  };
+}
+
+// Fallback only — the real value lives in platform_settings (decision 2: admin-editable,
+// no code change). This is what a fresh DB should be seeded with; see getPlatformFeeKobo().
+export const DEFAULT_PLATFORM_FEE_KOBO = 50000; // ₦500
+
+/**
+ * Reads the live platform service fee. Takes a plain db-query function rather than importing
+ * '@/db' directly, so pricing.ts stays free of DB wiring and stays easy to unit test.
+ */
+export async function getPlatformFeeKobo(
+  lookup: (key: string) => Promise<{ valueKobo: number } | undefined>,
+): Promise<number> {
+  const row = await lookup('platform_service_fee_kobo');
+  return row?.valueKobo ?? DEFAULT_PLATFORM_FEE_KOBO;
 }

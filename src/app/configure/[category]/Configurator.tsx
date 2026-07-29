@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { UploadCloud, FileCheck2, X } from 'lucide-react';
 import type { Category } from '@/lib/categories';
+import { sizeConfigFor } from '@/lib/categories';
 import type { CustomerSpec } from '@/lib/pricing';
 import { specToParams, specSummary } from '@/lib/spec';
 import { Glyph } from '@/components/ui/Glyph';
@@ -17,11 +18,14 @@ import { Field, Input, Select, Textarea } from '@/components/ui/Field';
  * prices on the next screen. The panel mirrors the spec live; final prices
  * are per printer, so none is promised here.
  */
-export function Configurator({ category }: { category: Category }) {
+export function Configurator({
+  category, initialVariant,
+}: { category: Category; initialVariant?: string }) {
   const router = useRouter();
   const qtyPresets = category.qty?.presets ?? [1];
 
-  const [service, setService] = useState<'print_only' | 'print_cut'>('print_cut');
+  // V2: variants live under the category (Category → Variant → Specs → Printer Pricing).
+  const [variant, setVariant] = useState<string | undefined>(initialVariant ?? category.variants?.[0]?.slug);
   const [sizeMode, setSizeMode] = useState<'preset' | 'custom'>('preset');
   const [preset, setPreset] = useState(0);
   const [w, setW] = useState('');
@@ -41,16 +45,18 @@ export function Configurator({ category }: { category: Category }) {
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState<string | null>(null);
 
-  const isBC = Boolean(category.businessCard);
-  const showSize = Boolean(category.size) && !isBC;
+  // Size options can be narrowed by the variant — Large Format stickers being the case
+  // that motivated it.
+  const sizeCfg = sizeConfigFor(category, variant);
+  const showSize = Boolean(sizeCfg);
   const effQty = customQty ? Number(customQty) : qty;
 
   const spec: CustomerSpec = useMemo(() => {
     const s: CustomerSpec = { category: category.slug, qty: effQty || undefined };
-    if (isBC) s.serviceType = service;
-    if (showSize) {
-      if (sizeMode === 'preset' && category.size) {
-        const p = category.size.presets[preset];
+    if (variant) s.variant = variant;
+    if (showSize && sizeCfg) {
+      if (sizeMode === 'preset') {
+        const p = sizeCfg.presets[Math.min(preset, sizeCfg.presets.length - 1)];
         s.width = p.width; s.height = p.height; s.unit = p.unit;
       } else {
         s.width = Number(w) || undefined; s.height = Number(h) || undefined; s.unit = unit;
@@ -58,15 +64,11 @@ export function Configurator({ category }: { category: Category }) {
     }
     if (category.fixedSizes) s.sizeLabel = fixedSize;
     if (category.jotter) { s.cover = cover; s.jSize = jSize; s.sheets = sheets; }
-    // Print-only cards: corners/gsm are cut-side concerns — only lamination applies (spec §6).
-    const axes = (category.addonAxes ?? []).filter((a) =>
-      !(isBC && service === 'print_only' && a.kind !== 'lamination'),
-    );
     const picked: Record<string, string> = {};
-    for (const a of axes) picked[a.kind] = addons[a.kind] ?? a.options[0];
+    for (const a of category.addonAxes ?? []) picked[a.kind] = addons[a.kind] ?? a.options[0];
     if (Object.keys(picked).length) s.addons = picked;
     return s;
-  }, [category, isBC, service, showSize, sizeMode, preset, w, h, unit, fixedSize, effQty, cover, jSize, sheets, addons]);
+  }, [category, variant, showSize, sizeCfg, sizeMode, preset, w, h, unit, fixedSize, effQty, cover, jSize, sheets, addons]);
 
   const sizeOk = !showSize || sizeMode === 'preset' || (Number(w) > 0 && Number(h) > 0);
   const qtyOk = !category.qty || (effQty >= category.qty.min);
@@ -95,9 +97,7 @@ export function Configurator({ category }: { category: Category }) {
     router.push(`/printers?${p.toString()}`);
   }
 
-  const axesToShow = (category.addonAxes ?? []).filter((a) =>
-    !(isBC && service === 'print_only' && a.kind !== 'lamination'),
-  );
+  const axesToShow = category.addonAxes ?? [];
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6">
@@ -106,29 +106,30 @@ export function Configurator({ category }: { category: Category }) {
 
       <div className="mt-7 grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
         <div className="space-y-6 rounded-2xl border border-black/12 bg-white p-5 sm:p-7">
-          {isBC && (
-            <div className="grid grid-cols-2 gap-2.5" role="radiogroup" aria-label="Service type">
-              {([
-                { v: 'print_cut', t: 'Print + Cut', d: 'Finished cards, ready to hand out' },
-                { v: 'print_only', t: 'Print only', d: 'A4 sheets — you cut them yourself' },
-              ] as const).map((o) => (
+          {category.variants && category.variants.length > 1 && (
+            <div
+              className={`grid gap-2.5 ${category.variants.length >= 3 ? 'sm:grid-cols-3' : 'grid-cols-2'}`}
+              role="radiogroup"
+              aria-label="Variant"
+            >
+              {category.variants.map((v) => (
                 <button
-                  key={o.v}
+                  key={v.slug}
                   role="radio"
-                  aria-checked={service === o.v}
-                  onClick={() => setService(o.v)}
+                  aria-checked={variant === v.slug}
+                  onClick={() => { setVariant(v.slug); setSizeMode('preset'); setPreset(0); }}
                   className={`rounded-2xl border p-4 text-left transition-colors ${
-                    service === o.v ? 'border-blue bg-blue text-white' : 'border-black/15 bg-white text-navy hover:border-black/35'
+                    variant === v.slug ? 'border-blue bg-blue text-white' : 'border-black/15 bg-white text-navy hover:border-black/35'
                   }`}
                 >
-                  <span className="block font-display text-[15px] font-extrabold">{o.t}</span>
-                  <span className={`mt-0.5 block text-xs ${service === o.v ? 'text-white/80' : 'text-black/50'}`}>{o.d}</span>
+                  <span className="block font-display text-[15px] font-extrabold">{v.label}</span>
+                  <span className={`mt-0.5 block text-xs ${variant === v.slug ? 'text-white/80' : 'text-black/50'}`}>{v.blurb}</span>
                 </button>
               ))}
             </div>
           )}
 
-          {showSize && category.size && (
+          {showSize && sizeCfg && (
             <div>
               <div className="mb-2.5 flex items-center justify-between">
                 <span className="font-display text-[13px] font-bold text-navy">Size</span>
@@ -137,7 +138,7 @@ export function Configurator({ category }: { category: Category }) {
                     <button
                       key={m}
                       onClick={() => setSizeMode(m)}
-                      disabled={m === 'custom' && !category.size!.allowCustom}
+                      disabled={m === 'custom' && !sizeCfg.allowCustom}
                       className={`rounded-pill px-3.5 py-1.5 font-display text-xs font-bold capitalize ${sizeMode === m ? 'bg-navy text-white' : 'text-navy'}`}
                     >
                       {m === 'preset' ? 'Presets' : 'Custom size'}
@@ -147,7 +148,7 @@ export function Configurator({ category }: { category: Category }) {
               </div>
               {sizeMode === 'preset' ? (
                 <div className="flex flex-wrap gap-2">
-                  {category.size.presets.map((p, i) => (
+                  {sizeCfg.presets.map((p, i) => (
                     <button
                       key={p.label}
                       onClick={() => setPreset(i)}

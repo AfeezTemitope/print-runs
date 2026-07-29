@@ -7,15 +7,20 @@ import { getCategory } from '@/lib/categories';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ButtonLink } from '@/components/ui/Button';
 import { naira, shortDate } from '@/lib/format';
+import { statusLabel } from '@/lib/status';
 
 export const metadata: Metadata = { title: 'My orders' };
 export const dynamic = 'force-dynamic';
 
+// V2: 7 stages (decision 18) rather than V1's 3.
 const BADGE: Record<string, string> = {
-  placed: 'bg-pale text-navy',
-  printing: 'bg-blue text-white',
-  ready: 'bg-navy text-pale',
-  completed: 'bg-success/15 text-success',
+  order_received: 'bg-pale text-navy',
+  printer_assigned: 'bg-pale text-navy',
+  printing_in_progress: 'bg-blue text-white',
+  printing_completed: 'bg-blue text-white',
+  ready_for_dispatch: 'bg-navy text-pale',
+  out_for_delivery: 'bg-navy text-pale',
+  delivered: 'bg-success/15 text-success',
   cancelled: 'bg-red/10 text-red',
 };
 
@@ -48,11 +53,10 @@ export default async function OrdersPage() {
       ) : (
         <ul className="mt-8 divide-y divide-dashed divide-black/15 rounded-2xl border border-black/12 bg-white">
           {rows.map(({ order, shopName }) => {
-            const label = order.isQuote && order.paymentStatus === 'unpaid'
+            const isPendingQuote = order.isQuote && order.paymentStatus === 'unpaid';
+            const label = isPendingQuote
               ? 'Quote requested'
-              : order.status === 'completed'
-                ? (order.fulfillmentMethod === 'pickup' ? 'Picked up' : 'Delivered')
-                : order.status;
+              : statusLabel(order.status, order.fulfillmentMethod);
             return (
               <li key={order.id}>
                 <Link href={`/orders/${order.id}`} className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 transition-colors hover:bg-pale/20">
@@ -64,10 +68,12 @@ export default async function OrdersPage() {
                     <p className="mt-0.5 text-[13px] text-black/50">{shopName} · {shortDate(order.createdAt)}</p>
                   </div>
                   <div className="flex items-center gap-3">
-                    <span className={`rounded-pill px-3 py-1 font-mono text-[10px] font-bold uppercase tracking-widest ${BADGE[order.isQuote && order.paymentStatus === 'unpaid' ? 'placed' : order.status]}`}>
+                    <span className={`rounded-pill px-3 py-1 font-mono text-[10px] font-bold uppercase tracking-widest ${BADGE[isPendingQuote ? 'order_received' : order.status]}`}>
                       {label}
                     </span>
-                    <span className="font-display font-extrabold text-navy">{naira(order.priceKobo)}</span>
+                    {/* amountPaidKobo is what the customer actually paid at checkout
+                        (selling price + platform fee). Delivery is quoted separately. */}
+                    <span className="font-display font-extrabold text-navy">{naira(order.amountPaidKobo)}</span>
                   </div>
                 </Link>
               </li>

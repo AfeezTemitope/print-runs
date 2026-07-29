@@ -6,6 +6,7 @@ import { getMyShop } from '@/lib/auth';
 import { getCategory } from '@/lib/categories';
 import { naira, shortDate } from '@/lib/format';
 import { ButtonLink } from '@/components/ui/Button';
+import { QUEUE_STATUSES, statusLabel } from '@/lib/status';
 
 export const metadata: Metadata = { title: 'Dashboard' };
 
@@ -17,9 +18,11 @@ export default async function DashboardPage() {
   const [pending, week, listings, recent] = await Promise.all([
     db().select({ c: count() }).from(tables.orders).where(and(
       eq(tables.orders.shopId, shop.id),
-      inArray(tables.orders.status, ['printing', 'ready']),
+      inArray(tables.orders.status, QUEUE_STATUSES),
     )),
-    db().select({ s: sum(tables.orders.priceKobo) }).from(tables.orders).where(and(
+    // A printer's earnings are their OWN base price — never the customer's selling price,
+    // which carries PrintRuns' commercial margin on top (decision 1).
+    db().select({ s: sum(tables.orders.printerBaseKobo) }).from(tables.orders).where(and(
       eq(tables.orders.shopId, shop.id),
       eq(tables.orders.paymentStatus, 'paid'),
       gte(tables.orders.createdAt, weekAgo),
@@ -72,13 +75,15 @@ export default async function DashboardPage() {
                   {getCategory(o.spec.category)?.name ?? o.spec.category}
                   <span className="ml-2 font-mono text-xs font-bold text-black/40">{o.code}</span>
                 </p>
-                <p className="text-xs text-black/50">{shortDate(o.createdAt)} · {o.fulfillmentMethod}</p>
+                <p className="text-xs text-black/50">
+                  {shortDate(o.createdAt)} · {o.fulfillmentMethod === 'collection' ? 'collection' : 'delivery'}
+                </p>
               </div>
               <div className="flex items-center gap-3">
                 <span className="font-mono text-[10px] font-bold uppercase tracking-widest text-navy/60">
-                  {o.isQuote && o.paymentStatus === 'unpaid' ? 'quote' : o.status}
+                  {o.isQuote && o.paymentStatus === 'unpaid' ? 'quote' : statusLabel(o.status, o.fulfillmentMethod)}
                 </span>
-                <span className="font-display text-sm font-extrabold text-navy">{naira(o.priceKobo)}</span>
+                <span className="font-display text-sm font-extrabold text-navy">{naira(o.printerBaseKobo)}</span>
               </div>
             </li>
           ))}

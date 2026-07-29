@@ -1,29 +1,44 @@
 'use client';
 
 import { useState } from 'react';
-import { Bike, Store } from 'lucide-react';
+import { Bike } from 'lucide-react';
 import { naira } from '@/lib/format';
 import { Button } from '@/components/ui/Button';
 import { Field, Input } from '@/components/ui/Field';
 import { CodeBadge } from '@/components/ui/CodeBadge';
 
 type Props = {
-  shop: { id: string; name: string; code: string; supportsPickup: boolean; supportsDelivery: boolean };
+  shop: { id: string; name: string; code: string };
   categoryName: string;
   isQuote: boolean;
   lines: { label: string; amountKobo: number }[];
+  sellingPriceKobo: number | null;
+  platformFeeKobo: number | null;
   totalKobo: number | null;
   query: Record<string, string>;
 };
 
-export function CheckoutClient({ shop, categoryName, isQuote, lines, totalKobo, query }: Props) {
-  const [method, setMethod] = useState<'delivery' | 'pickup'>(shop.supportsDelivery ? 'delivery' : 'pickup');
+/**
+ * V2: no fulfillment choice here — every order is delivery, and the delivery fee itself is
+ * quoted by a PrintRuns rep after payment (decision 13/B1), so it never appears on this screen.
+ * Contact fields (email + both phone numbers) and the design-confirmation checkbox are new
+ * required fields (decision 21 / Batch 1 foundation).
+ */
+export function CheckoutClient({ shop, categoryName, isQuote, lines, sellingPriceKobo, platformFeeKobo, totalKobo, query }: Props) {
   const [address, setAddress] = useState('');
+  const [email, setEmail] = useState('');
+  const [phonePrimary, setPhonePrimary] = useState('');
+  const [phoneSecondary, setPhoneSecondary] = useState('');
+  const [designConfirmed, setDesignConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const needsAddress = method === 'delivery';
-  const ready = !needsAddress || address.trim().length > 5;
+  const ready =
+    address.trim().length > 5 &&
+    email.trim().includes('@') &&
+    phonePrimary.trim().length >= 7 &&
+    phoneSecondary.trim().length >= 7 &&
+    designConfirmed;
 
   async function pay() {
     setBusy(true);
@@ -31,7 +46,15 @@ export function CheckoutClient({ shop, categoryName, isQuote, lines, totalKobo, 
     const res = await fetch('/api/checkout', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...query, shop: shop.id, fulfillmentMethod: method, deliveryAddress: address }),
+      body: JSON.stringify({
+        ...query,
+        shop: shop.id,
+        deliveryAddress: address,
+        contactEmail: email,
+        contactPhonePrimary: phonePrimary,
+        contactPhoneSecondary: phoneSecondary,
+        designConfirmed: designConfirmed ? 'true' : 'false',
+      }),
     });
     const json = await res.json();
     if (!res.ok) { setBusy(false); setError(json.error ?? 'Could not start checkout.'); return; }
@@ -50,49 +73,33 @@ export function CheckoutClient({ shop, categoryName, isQuote, lines, totalKobo, 
       </p>
 
       <section className="mt-7 rounded-2xl border border-black/12 bg-white p-5 sm:p-6">
-        <h2 className="font-display text-sm font-extrabold uppercase tracking-wide text-navy">How do you want it?</h2>
-        <div className="mt-3 grid gap-2.5 sm:grid-cols-2" role="radiogroup" aria-label="Fulfillment">
-          <button
-            role="radio"
-            aria-checked={method === 'delivery'}
-            disabled={!shop.supportsDelivery}
-            onClick={() => setMethod('delivery')}
-            className={`flex items-start gap-3 rounded-2xl border p-4 text-left transition-colors disabled:opacity-40 ${
-              method === 'delivery' ? 'border-blue bg-blue text-white' : 'border-black/15 text-navy hover:border-black/35'
-            }`}
-          >
-            <Bike className="mt-0.5 size-5 shrink-0" />
-            <span>
-              <span className="block font-display text-[15px] font-extrabold">Delivery</span>
-              <span className={`text-xs ${method === 'delivery' ? 'text-white/80' : 'text-black/50'}`}>Rider brings it — Island & Mainland</span>
+        <h2 className="font-display text-sm font-extrabold uppercase tracking-wide text-navy">Delivery details</h2>
+        <div className="mt-3 flex items-start gap-3 rounded-2xl border border-blue bg-blue px-4 py-3.5 text-white">
+          <Bike className="mt-0.5 size-5 shrink-0" />
+          <span>
+            <span className="block font-display text-[15px] font-extrabold">Delivery</span>
+            <span className="text-xs text-white/80">
+              A PrintRuns rep will contact you after payment to confirm the delivery fee.
             </span>
-          </button>
-          {/* Pickup renders only when this printer supports it (spec §3 screen 5). */}
-          {shop.supportsPickup && (
-            <button
-              role="radio"
-              aria-checked={method === 'pickup'}
-              onClick={() => setMethod('pickup')}
-              className={`flex items-start gap-3 rounded-2xl border p-4 text-left transition-colors ${
-                method === 'pickup' ? 'border-blue bg-blue text-white' : 'border-black/15 text-navy hover:border-black/35'
-              }`}
-            >
-              <Store className="mt-0.5 size-5 shrink-0" />
-              <span>
-                <span className="block font-display text-[15px] font-extrabold">Self-pickup</span>
-                <span className={`text-xs ${method === 'pickup' ? 'text-white/80' : 'text-black/50'}`}>Collect it from the shop yourself</span>
-              </span>
-            </button>
-          )}
+          </span>
         </div>
 
-        {needsAddress && (
-          <div className="mt-4">
-            <Field label="Delivery address">
-              <Input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="e.g. 24 Admiralty Way, Lekki Phase 1" autoComplete="street-address" />
+        <div className="mt-4 space-y-3.5">
+          <Field label="Delivery address">
+            <Input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="e.g. 24 Admiralty Way, Lekki Phase 1" autoComplete="street-address" />
+          </Field>
+          <Field label="Email">
+            <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" autoComplete="email" />
+          </Field>
+          <div className="grid gap-3.5 sm:grid-cols-2">
+            <Field label="Primary phone">
+              <Input type="tel" value={phonePrimary} onChange={(e) => setPhonePrimary(e.target.value)} placeholder="0803 000 0000" autoComplete="tel" />
+            </Field>
+            <Field label="Secondary phone" hint="Required — helps us reach you about delivery.">
+              <Input type="tel" value={phoneSecondary} onChange={(e) => setPhoneSecondary(e.target.value)} placeholder="0803 000 0000" autoComplete="tel" />
             </Field>
           </div>
-        )}
+        </div>
       </section>
 
       <section className="mt-5 rounded-2xl border border-black/12 bg-white p-5 sm:p-6">
@@ -112,12 +119,39 @@ export function CheckoutClient({ shop, categoryName, isQuote, lines, totalKobo, 
                 <dd className="font-bold text-navy">{naira(l.amountKobo)}</dd>
               </div>
             ))}
+            {sellingPriceKobo != null && (
+              <div className="flex justify-between border-b border-dashed border-black/20 py-2.5">
+                <dt className="text-black/55">Product price</dt>
+                <dd className="font-bold text-navy">{naira(sellingPriceKobo)}</dd>
+              </div>
+            )}
+            {platformFeeKobo != null && (
+              <div className="flex justify-between border-b border-dashed border-black/20 py-2.5">
+                <dt className="text-black/55">Platform service fee</dt>
+                <dd className="font-bold text-navy">{naira(platformFeeKobo)}</dd>
+              </div>
+            )}
             <div className="flex justify-between pt-3">
-              <dt className="font-display font-extrabold text-navy">Total</dt>
+              <dt className="font-display font-extrabold text-navy">Total (delivery quoted separately)</dt>
               <dd className="font-display text-xl font-extrabold text-navy">{naira(totalKobo)}</dd>
             </div>
           </dl>
         )}
+      </section>
+
+      <section className="mt-5 rounded-2xl border border-black/12 bg-white p-5 sm:p-6">
+        <label className="flex items-start gap-3">
+          <input
+            type="checkbox"
+            checked={designConfirmed}
+            onChange={(e) => setDesignConfirmed(e.target.checked)}
+            className="mt-0.5 size-4 accent-blue"
+          />
+          <span className="text-sm leading-relaxed text-black/70">
+            I confirm the artwork I&apos;ve provided is final and ready to print. I understand PrintRuns and
+            the printer are not responsible for errors that were visible in what I approved.
+          </span>
+        </label>
       </section>
 
       {error && <p className="mt-4 rounded-xl border border-red/30 bg-red/5 px-3.5 py-2.5 text-sm text-red">{error}</p>}

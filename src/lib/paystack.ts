@@ -44,5 +44,6 @@ export async function paystackVerify(reference: string) {
     reference: string;
     channel: string;
     paid_at: string | null;
+    metadata: Record<string, unknown> | null;
   };
 }

@@ -27,7 +27,7 @@ export default async function TrackPage() {
     .innerJoin(tables.shops, eq(tables.orders.shopId, tables.shops.id))
     .where(and(
       eq(tables.orders.customerId, session.uid),
-      ne(tables.orders.status, 'completed'),
+      ne(tables.orders.status, 'delivered'),
       ne(tables.orders.status, 'cancelled'),
     ))
     .orderBy(desc(tables.orders.createdAt));
@@ -67,9 +67,23 @@ export default async function TrackPage() {
               ) : (
                 <div className="mt-5"><StatusTracker status={order.status} method={order.fulfillmentMethod} /></div>
               )}
+              {order.fulfillmentMethod === 'delivery' && order.deliveryFeeKobo == null && !order.isQuote && (
+                <p className="mt-4 rounded-xl bg-pale/40 px-4 py-3 text-[13px] leading-relaxed text-navy">
+                  A PrintRuns representative will contact you to confirm your delivery details.
+                  The delivery fee is charged separately from the amount above.
+                </p>
+              )}
+              {order.deliveryFeeKobo != null && (
+                <p className="mt-4 flex items-center justify-between rounded-xl bg-pale/40 px-4 py-3 text-[13px] text-navy">
+                  <span>Delivery fee (paid separately)</span>
+                  <span className="font-display font-extrabold">{naira(order.deliveryFeeKobo)}</span>
+                </p>
+              )}
               <div className="mt-4 flex items-center justify-between border-t border-dashed border-black/25 pt-3.5 text-sm">
-                <span className="text-black/55">{order.fulfillmentMethod === 'pickup' ? 'Self-pickup' : 'Delivery'}</span>
-                <span className="font-display font-extrabold text-navy">{naira(order.priceKobo)}</span>
+                <span className="text-black/55">
+                  {order.fulfillmentMethod === 'collection' ? 'You are collecting' : 'Delivery'}
+                </span>
+                <span className="font-display font-extrabold text-navy">{naira(order.amountPaidKobo)}</span>
               </div>
             </li>
           ))}

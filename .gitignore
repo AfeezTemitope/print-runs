@@ -34,3 +34,7 @@ next-env.d.ts
 .vscode/*
 !.vscode/extensions.json
 .idea
+
+# Print Runs V2 installer backups
+.pr-v2-backup-*/
+*.sh

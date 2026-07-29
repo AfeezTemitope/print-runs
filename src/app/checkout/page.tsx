@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation';
 import { eq } from 'drizzle-orm';
 import { db, tables } from '@/db';
 import { getCategory } from '@/lib/categories';
-import { computePrice } from '@/lib/pricing';
+import { computePrice, computeOrderTotals, getPlatformFeeKobo } from '@/lib/pricing';
 import { specFromParams } from '@/lib/spec';
 import { CheckoutClient } from './CheckoutClient';
 
@@ -13,7 +13,11 @@ export const dynamic = 'force-dynamic';
 type SP = Record<string, string | string[] | undefined>;
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
 
-/** Screens 5–6 (spec §3): fulfillment choice (pickup only if the printer supports it), then pay. */
+/**
+ * V2: fulfillment is no longer a customer choice here — every order is delivery, and the
+ * delivery fee itself is quoted manually after payment (decision 13/B1). This screen now
+ * collects delivery address + contact details + a design-confirmation checkbox, then pays.
+ */
 export default async function CheckoutPage({ searchParams }: { searchParams: Promise<SP> }) {
   const sp = await searchParams;
   const spec = specFromParams(sp);
@@ -34,16 +38,29 @@ export default async function CheckoutPage({ searchParams }: { searchParams: Pro
   const price = computePrice(spec, product, variants, addons);
   const isQuote = one(sp.quote) === '1' || !price.ok;
 
+  let sellingPriceKobo: number | null = null;
+  let platformFeeKobo: number | null = null;
+  let amountPaidKobo: number | null = null;
+  if (price.ok) {
+    const feeKobo = await getPlatformFeeKobo((key) =>
+      db().select().from(tables.platformSettings).where(eq(tables.platformSettings.key, key)).limit(1)
+        .then((rows) => rows[0]),
+    );
+    const totals = computeOrderTotals(price.totalKobo, spec.qty ?? 1, product, feeKobo);
+    sellingPriceKobo = totals.sellingPriceKobo;
+    platformFeeKobo = totals.platformFeeKobo;
+    amountPaidKobo = totals.amountPaidKobo;
+  }
+
   return (
     <CheckoutClient
-      shop={{
-        id: shop.id, name: shop.businessName, code: shop.code,
-        supportsPickup: shop.supportsPickup, supportsDelivery: shop.supportsDelivery,
-      }}
+      shop={{ id: shop.id, name: shop.businessName, code: shop.code }}
       categoryName={getCategory(spec.category)!.name}
       isQuote={isQuote}
       lines={price.ok ? price.lines : []}
-      totalKobo={price.ok ? price.totalKobo : null}
+      platformFeeKobo={platformFeeKobo}
+      totalKobo={amountPaidKobo}
+      sellingPriceKobo={sellingPriceKobo}
       query={Object.fromEntries(Object.entries(sp).flatMap(([k, v]) => (one(v) ? [[k, one(v)!]] : [])))}
     />
   );

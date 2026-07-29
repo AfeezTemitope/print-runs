@@ -12,7 +12,7 @@ export async function submitReview(input: { orderId: string; rating: number; com
   const [order] = await db().select().from(tables.orders).where(and(
     eq(tables.orders.id, input.orderId),
     eq(tables.orders.customerId, session.uid),
-    eq(tables.orders.status, 'completed'),
+    eq(tables.orders.status, 'delivered'),
   )).limit(1);
   if (!order) return { error: 'Only completed orders can be rated.' };
 

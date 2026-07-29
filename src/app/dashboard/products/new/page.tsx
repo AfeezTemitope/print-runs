@@ -9,7 +9,7 @@ export default function NewProductPage() {
       <h1 className="mb-6 font-display text-3xl font-extrabold tracking-tight text-black">Add product</h1>
       <ProductForm initial={{
         categorySlug: 'sticker', name: '', pricingMode: 'per_area',
-        areaUnit: 'sqft', ratePerUnit: '', minCharge: '', perSheet: '', cardsPerSheet: '10',
+        areaUnit: 'sqft', ratePerUnit: '', minCharge: '',
         turnaroundHours: '24', photoUrl: '', tiers: [], matrix: [], addons: [],
       }} />
     </div>
