@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation';
 import { and, eq } from 'drizzle-orm';
 import { db, tables } from '@/db';
 import { getSession } from '@/lib/auth';
-import { getCategory } from '@/lib/categories';
+import { getCategory, listingLabel } from '@/lib/categories';
 import { specSummary } from '@/lib/spec';
 import { StatusTracker } from '@/components/ui/StatusTracker';
 import { CodeBadge } from '@/components/ui/CodeBadge';
@@ -55,7 +55,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
       <section className="mt-5 rounded-2xl border border-black/12 bg-white p-5 sm:p-6">
         <h2 className="font-display text-sm font-extrabold uppercase tracking-wide text-navy">Spec</h2>
         <dl className="mt-3 font-mono text-sm">
-          {specSummary(order.spec).map((line, i) => (
+          {specSummary(order.spec, listingLabel(order.spec.category, order.spec.listing)).map((line, i) => (
             <div key={i} className="border-b border-dashed border-black/15 py-2 text-navy">{line}</div>
           ))}
           {order.printNote && (

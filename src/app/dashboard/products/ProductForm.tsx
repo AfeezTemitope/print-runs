@@ -2,70 +2,35 @@
 
 import { useMemo, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { Plus, Trash2 } from 'lucide-react';
-import { CATEGORIES, getCategory } from '@/lib/categories';
+import { RotateCcw, Trash2 } from 'lucide-react';
+import { LIVE_CATEGORIES, getCategory, getListing, gridCells, cellKey } from '@/lib/categories';
 import { Button } from '@/components/ui/Button';
 import { Field, Input, Select } from '@/components/ui/Field';
 import { saveProduct, type ProductPayload } from './actions';
 
 /**
- * Screen 3 + §4.2 (spec): the form changes shape with the pricing mode.
- *  Per ft/sq.ft — rate (+ min charge)
- *  Quantity tier — repeatable qty/price/label rows
- *  Request quote — nothing to price
- * Plus fixed sizes (frames) and the
- * jotter matrix. Add-ons are one shared component priced per option (§6).
+ * Printer pricing form, rebuilt for QA Round 1.
+ *
+ *  QA 1.3 — the Product name field is gone platform-wide; the name is derived server-side.
+ *  QA 1.4 — the unlabeled "e.g. matte, single side" field is gone.
+ *  QA 1.5 — grids auto-generate every combination. The printer fills prices and deletes the
+ *           rows they do not offer; anything blank or deleted falls back to Request Quote.
+ *  QA 3.4 — each listing (Standard vs Rounded, Round Cut vs Straight Cut) is its own product
+ *           with its own grid, so the listing picker sits right under the category picker.
  */
-
-type TierRow = { qty: string; price: string; label: string };
-type MatrixRow = { cover: string; size: string; sheets: string; price: string };
-type AddonRow = { kind: string; label: string; basis: string; price: string };
 
 export type InitialProduct = {
   id?: string;
   categorySlug: string;
-  name: string;
+  listingSlug: string;
   pricingMode: string;
-  areaUnit: string | null;
   ratePerUnit: string;   // naira strings in the form; kobo in the DB
-  minCharge: string;
+  offersHylet: boolean;
   turnaroundHours: string;
   photoUrl: string;
-  tiers: TierRow[];
-  matrix: MatrixRow[];
-  addons: AddonRow[];
-};
-
-const MODES_BY_CATEGORY: Record<string, { value: string; label: string; hint: string }[]> = {
-  sticker: [
-    { value: 'per_area', label: 'Per sq.ft / sq.in', hint: 'Large single stickers — size × rate' },
-    { value: 'tier', label: 'Quantity tier', hint: 'Bulk small stickers — flat price per batch' },
-    { value: 'quote', label: 'Request quote', hint: 'No price shown — customers send a request' },
-  ],
-  banner: [
-    { value: 'per_area', label: 'Per sq.ft', hint: 'Width × height auto-calculates the price' },
-    { value: 'quote', label: 'Request quote', hint: 'No price shown' },
-  ],
-  flyer: [
-    { value: 'tier', label: 'Quantity tier', hint: 'e.g. 100pcs = ₦X' },
-    { value: 'quote', label: 'Request quote', hint: 'No price shown' },
-  ],
-  business_card: [
-    { value: 'tier', label: 'Print + Cut — quantity tiers', hint: 'Finished cards' },
-    { value: 'quote', label: 'Request quote', hint: 'No price shown' },
-  ],
-  nylon: [
-    { value: 'tier', label: 'Quantity tier', hint: 'Per batch' },
-    { value: 'quote', label: 'Request quote', hint: 'No price shown' },
-  ],
-  jotter: [
-    { value: 'matrix', label: 'Price matrix', hint: 'Cover × size × sheet count' },
-    { value: 'quote', label: 'Request quote', hint: 'No price shown' },
-  ],
-  frame: [
-    { value: 'fixed_size', label: 'Price per size', hint: 'A4 / A3 / A2 — closed list' },
-    { value: 'quote', label: 'Request quote', hint: 'No price shown' },
-  ],
+  /** key = cellKey(grid, coords) */
+  cellPrices: Record<string, string>;
+  addonPrices: Record<string, string>;   // key = `${kind}::${label}`
 };
 
 const BASIS_LABEL: Record<string, string> = { per_piece: 'per piece', per_sheet: 'per sheet', flat: 'flat' };
@@ -75,53 +40,84 @@ export function ProductForm({ initial }: { initial: InitialProduct }) {
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
-  const [category, setCategory] = useState(initial.categorySlug);
-  const modes = MODES_BY_CATEGORY[category] ?? [{ value: 'quote', label: 'Request quote', hint: '' }];
-  const [mode, setMode] = useState(initial.pricingMode || modes[0].value);
-  const [name, setName] = useState(initial.name);
-  const [areaUnit, setAreaUnit] = useState(initial.areaUnit ?? 'sqft');
+  const [categorySlug, setCategorySlug] = useState(initial.categorySlug);
+  const [listingSlug, setListingSlug] = useState(initial.listingSlug);
+  const [mode, setMode] = useState(initial.pricingMode || 'quote');
   const [rate, setRate] = useState(initial.ratePerUnit);
-  const [minCharge, setMinCharge] = useState(initial.minCharge);
+  const [offersHylet, setOffersHylet] = useState(initial.offersHylet);
   const [turnaround, setTurnaround] = useState(initial.turnaroundHours || '24');
   const [photoUrl, setPhotoUrl] = useState(initial.photoUrl);
-  const [tiers, setTiers] = useState<TierRow[]>(initial.tiers.length ? initial.tiers : [{ qty: '100', price: '', label: '' }]);
-  const [matrix, setMatrix] = useState<MatrixRow[]>(initial.matrix.length ? initial.matrix : [{ cover: 'Soft cover', size: 'A5', sheets: '40', price: '' }]);
-  const [addons, setAddons] = useState<AddonRow[]>(initial.addons);
+  const [cellPrices, setCellPrices] = useState<Record<string, string>>(initial.cellPrices);
+  const [removed, setRemoved] = useState<Set<string>>(new Set());
+  const [addonPrices, setAddonPrices] = useState<Record<string, string>>(initial.addonPrices);
 
-  const cat = getCategory(category);
+  const cat = getCategory(categorySlug);
+  const listing = cat ? getListing(cat, listingSlug) ?? cat.listings[0] : undefined;
+  const grid = listing?.pricingGrid;
+  const perArea = Boolean(listing?.perAreaRate);
+
+  // Request Quote is always available as a secondary option (QA 3.8 / 3.9).
+  const modes = useMemo(() => {
+    const out: { value: string; label: string; hint: string }[] = [];
+    if (perArea) out.push({ value: 'per_area', label: 'Per sq.ft', hint: 'Width × height auto-calculates the price' });
+    if (grid) {
+      out.push({
+        value: 'matrix',
+        label: 'Price grid',
+        hint: grid.priceType === 'per_piece' ? 'Rate per piece for each combination' : 'Flat batch price for each combination',
+      });
+    }
+    out.push({ value: 'quote', label: 'Request quote', hint: 'No price shown — customers send a request' });
+    return out;
+  }, [grid, perArea]);
+
   const validMode = modes.some((m) => m.value === mode) ? mode : modes[0].value;
-  const fixedSizes = cat?.fixedSizes ?? [];
-  const jotter = cat?.jotter;
+  const cells = useMemo(() => (grid ? gridCells(grid) : []), [grid]);
 
-  const addonKinds = useMemo(() => {
-    const axes = cat?.addonAxes ?? [];
-    return axes.map((a) => ({
-      kind: a.kind,
-      // paid options only — the first option of every axis is the free default
-      options: a.options.slice(1),
-    })).filter((a) => a.options.length);
-  }, [cat]);
+  function switchCategory(slug: string) {
+    const next = getCategory(slug);
+    setCategorySlug(slug);
+    setListingSlug(next?.listings[0]?.slug ?? '');
+    setMode('');
+    setCellPrices({});
+    setRemoved(new Set());
+    setAddonPrices({});
+  }
+
+  function switchListing(slug: string) {
+    setListingSlug(slug);
+    setMode('');
+    setCellPrices({});
+    setRemoved(new Set());
+    setAddonPrices({});
+  }
 
   function submit() {
     setError(null);
+    if (!cat || !listing) { setError('Pick a product first.'); return; }
+
     const payload: ProductPayload = {
       id: initial.id,
-      categorySlug: category,
-      name: name.trim() || `${cat?.name ?? category}`,
+      categorySlug,
+      listingSlug: listing.slug,
       pricingMode: validMode,
-      areaUnit: validMode === 'per_area' ? areaUnit : null,
-      ratePerUnit: rate,
-      minCharge,
+      ratePerUnit: validMode === 'per_area' ? rate : '',
+      offersHylet: perArea ? offersHylet : false,
       turnaroundHours: turnaround,
       photoUrl: photoUrl.trim(),
-      tiers: validMode === 'tier'
-        ? tiers
-        : validMode === 'fixed_size'
-          ? fixedSizes.map((s) => ({ qty: '1', price: tiers.find((t) => t.label === s)?.price ?? '', label: s }))
-          : [],
-      matrix: validMode === 'matrix' ? matrix : [],
-      addons,
+      cells: validMode === 'matrix' && grid
+        ? cells
+            .filter((c) => !removed.has(cellKey(grid, c)))
+            .map((c) => ({ coords: c, price: cellPrices[cellKey(grid, c)] ?? '' }))
+            .filter((c) => c.price)
+        : [],
+      addons: validMode !== 'quote'
+        ? (listing.fixedAddons ?? [])
+            .map((a) => ({ ...a, price: addonPrices[`${a.kind}::${a.label}`] ?? '' }))
+            .filter((a) => a.price)
+        : [],
     };
+
     start(async () => {
       const res = await saveProduct(payload);
       if (res?.error) { setError(res.error); return; }
@@ -137,17 +133,25 @@ export function ProductForm({ initial }: { initial: InitialProduct }) {
     </div>
   );
 
+  const filledCount = grid
+    ? cells.filter((c) => !removed.has(cellKey(grid, c)) && cellPrices[cellKey(grid, c)]).length
+    : 0;
+
   return (
-    <div className="max-w-2xl space-y-6">
+    <div className="max-w-3xl space-y-6">
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Category">
-          <Select value={category} onChange={(e) => { setCategory(e.target.value); setMode(MODES_BY_CATEGORY[e.target.value]?.[0].value ?? 'quote'); }}>
-            {CATEGORIES.filter((c) => c.live).map((c) => <option key={c.slug} value={c.slug}>{c.name}</option>)}
+        <Field label="Product">
+          <Select value={categorySlug} onChange={(e) => switchCategory(e.target.value)}>
+            {LIVE_CATEGORIES.map((c) => <option key={c.slug} value={c.slug}>{c.name}</option>)}
           </Select>
         </Field>
-        <Field label="Product name">
-          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={`e.g. ${cat?.name ?? 'Product'}`} />
-        </Field>
+        {cat && cat.listings.length > 1 && (
+          <Field label="Type" hint="Each type is priced separately.">
+            <Select value={listingSlug} onChange={(e) => switchListing(e.target.value)}>
+              {cat.listings.map((l) => <option key={l.slug} value={l.slug}>{l.label}</option>)}
+            </Select>
+          </Field>
+        )}
       </div>
 
       <div>
@@ -171,121 +175,123 @@ export function ProductForm({ initial }: { initial: InitialProduct }) {
       </div>
 
       {validMode === 'per_area' && (
-        <div className="grid gap-4 sm:grid-cols-3">
-          <Field label="Rate">{priceInput(rate, setRate, '1800')}</Field>
-          <Field label="Per">
-            <Select value={areaUnit} onChange={(e) => setAreaUnit(e.target.value)}>
-              <option value="sqft">sq.ft</option><option value="sqin">sq.inch</option>
-            </Select>
-          </Field>
-          <Field label="Minimum charge" hint="Optional floor per piece">{priceInput(minCharge, setMinCharge)}</Field>
-        </div>
+        <>
+          {/* QA 3.1: no unit dropdown — sq.ft is the only unit — and no minimum charge field. */}
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Rate">{priceInput(rate, setRate, '1800')}</Field>
+            <Field label="Per">
+              <div className="flex h-11 items-center rounded-xl border border-black/15 px-3.5 font-mono text-sm font-bold text-navy">
+                sq.ft
+              </div>
+            </Field>
+          </div>
+          <p className="text-xs text-black/45">
+            No price floor — if a custom size comes in too small to be worth printing, reject the job from your queue.
+          </p>
+        </>
       )}
 
-      {validMode === 'tier' && (
-        <div>
-          <span className="mb-2.5 block font-display text-[13px] font-bold text-navy">Quantity tiers</span>
-          <div className="space-y-2">
-            {tiers.map((t, i) => (
-              <div key={i} className="grid grid-cols-[90px_1fr_1fr_36px] items-center gap-2">
-                <Input inputMode="numeric" aria-label="Quantity" value={t.qty}
-                  onChange={(e) => setTiers(tiers.map((x, j) => (j === i ? { ...x, qty: e.target.value.replace(/\D/g, '') } : x)))} placeholder="100" />
-                {priceInput(t.price, (v) => setTiers(tiers.map((x, j) => (j === i ? { ...x, price: v } : x))), '20000')}
-                <Input aria-label="Variant label (optional)" value={t.label}
-                  onChange={(e) => setTiers(tiers.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))} placeholder="e.g. matte, single side" />
-                <button aria-label="Remove tier" onClick={() => setTiers(tiers.filter((_, j) => j !== i))} className="text-black/35 hover:text-red" disabled={tiers.length === 1}>
-                  <Trash2 className="size-4" />
-                </button>
-              </div>
+      {validMode === 'per_area' && listing?.optionAxes?.some((a) => a.key === 'hylet') && (
+        <div className="flex items-center justify-between rounded-2xl border border-black/12 p-4">
+          <div>
+            <p className="font-display text-[13px] font-bold text-navy">Do you offer hylet?</p>
+            <p className="mt-0.5 text-xs text-black/50">Always free to the customer — there is no price to set.</p>
+          </div>
+          <div className="flex gap-1 rounded-pill bg-black/5 p-0.5">
+            {[true, false].map((v) => (
+              <button
+                key={String(v)}
+                onClick={() => setOffersHylet(v)}
+                className={`rounded-pill px-4 py-1.5 font-display text-xs font-bold ${offersHylet === v ? 'bg-navy text-white' : 'text-navy'}`}
+              >
+                {v ? 'Yes' : 'No'}
+              </button>
             ))}
           </div>
-          <Button variant="tertiary" size="sm" className="mt-2.5" onClick={() => setTiers([...tiers, { qty: '', price: '', label: '' }])}>
-            <Plus className="size-4" /> Add tier
-          </Button>
         </div>
       )}
 
-      {validMode === 'fixed_size' && (
+      {validMode === 'matrix' && grid && (
         <div>
-          <span className="mb-2.5 block font-display text-[13px] font-bold text-navy">Price per size</span>
-          <div className="space-y-2">
-            {fixedSizes.map((s) => (
-              <div key={s} className="grid grid-cols-[70px_1fr] items-center gap-3">
-                <span className="font-mono text-sm font-bold text-navy">{s}</span>
-                {priceInput(
-                  tiers.find((t) => t.label === s)?.price ?? '',
-                  (v) => setTiers((prev) => {
-                    const others = prev.filter((t) => t.label !== s);
-                    return [...others, { qty: '1', price: v, label: s }];
-                  }),
-                )}
-              </div>
-            ))}
+          <div className="mb-1 flex items-baseline justify-between gap-3">
+            <span className="font-display text-[13px] font-bold text-navy">
+              Price grid — {grid.priceType === 'per_piece' ? 'rate per piece' : 'total per batch'}
+            </span>
+            <span className="font-mono text-[11px] font-bold text-black/45">{filledCount}/{cells.length} priced</span>
           </div>
-          <p className="mt-1.5 text-xs text-black/45">Leave a size empty to not offer it — those requests fall back to quote.</p>
+          <p className="mb-3 text-xs text-black/50">
+            {grid.priceType === 'per_piece'
+              ? 'Enter what you charge for ONE piece in each combination.'
+              : 'Enter the TOTAL you charge for that whole batch, not the price of one piece.'}
+            {' '}Leave a row blank or delete it and that combination shows as Request Quote.
+          </p>
+
+          <div className="overflow-hidden rounded-2xl border border-black/12">
+            <div
+              className="grid items-center gap-2 border-b border-black/10 bg-black/[0.03] px-3 py-2 font-mono text-[10px] font-bold uppercase tracking-widest text-black/50"
+              style={{ gridTemplateColumns: `repeat(${grid.axes.length}, minmax(0,1fr)) 140px 32px` }}
+            >
+              {grid.axes.map((a) => <span key={a.key}>{a.label}</span>)}
+              <span>Price</span>
+              <span className="sr-only">Remove</span>
+            </div>
+
+            {cells.map((c) => {
+              const key = cellKey(grid, c);
+              const gone = removed.has(key);
+              return (
+                <div
+                  key={key}
+                  className={`grid items-center gap-2 border-b border-black/8 px-3 py-2 last:border-0 ${gone ? 'opacity-40' : ''}`}
+                  style={{ gridTemplateColumns: `repeat(${grid.axes.length}, minmax(0,1fr)) 140px 32px` }}
+                >
+                  {grid.axes.map((a) => (
+                    <span key={a.key} className={`font-mono text-[12px] font-bold text-navy ${gone ? 'line-through' : ''}`}>
+                      {String(c[a.key])}
+                    </span>
+                  ))}
+                  {gone ? (
+                    <span className="font-mono text-[11px] text-black/45">Request quote</span>
+                  ) : (
+                    priceInput(cellPrices[key] ?? '', (v) => setCellPrices((p) => ({ ...p, [key]: v })))
+                  )}
+                  <button
+                    aria-label={gone ? 'Restore row' : 'Remove row'}
+                    onClick={() => setRemoved((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(key)) next.delete(key); else next.add(key);
+                      return next;
+                    })}
+                    className="text-black/35 hover:text-red"
+                  >
+                    {gone ? <RotateCcw className="size-4" /> : <Trash2 className="size-4" />}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 
-      {validMode === 'matrix' && jotter && (
-        <div>
-          <span className="mb-2.5 block font-display text-[13px] font-bold text-navy">Price matrix (per piece)</span>
-          <div className="space-y-2">
-            {matrix.map((r, i) => (
-              <div key={i} className="grid grid-cols-[1fr_80px_100px_1fr_36px] items-center gap-2">
-                <Select aria-label="Cover" value={r.cover} onChange={(e) => setMatrix(matrix.map((x, j) => (j === i ? { ...x, cover: e.target.value } : x)))}>
-                  {jotter.covers.map((c) => <option key={c}>{c}</option>)}
-                </Select>
-                <Select aria-label="Size" value={r.size} onChange={(e) => setMatrix(matrix.map((x, j) => (j === i ? { ...x, size: e.target.value } : x)))}>
-                  {jotter.sizes.map((c) => <option key={c}>{c}</option>)}
-                </Select>
-                <Select aria-label="Sheets" value={r.sheets} onChange={(e) => setMatrix(matrix.map((x, j) => (j === i ? { ...x, sheets: e.target.value } : x)))}>
-                  {jotter.sheets.map((c) => <option key={c} value={String(c)}>{c} sh</option>)}
-                </Select>
-                {priceInput(r.price, (v) => setMatrix(matrix.map((x, j) => (j === i ? { ...x, price: v } : x))))}
-                <button aria-label="Remove row" onClick={() => setMatrix(matrix.filter((_, j) => j !== i))} className="text-black/35 hover:text-red" disabled={matrix.length === 1}>
-                  <Trash2 className="size-4" />
-                </button>
-              </div>
-            ))}
-          </div>
-          <Button variant="tertiary" size="sm" className="mt-2.5" onClick={() => setMatrix([...matrix, { cover: jotter.covers[0], size: jotter.sizes[0], sheets: String(jotter.sheets[0]), price: '' }])}>
-            <Plus className="size-4" /> Add row
-          </Button>
-        </div>
-      )}
-
-      {validMode !== 'quote' && addonKinds.length > 0 && (
+      {/* QA 3.3: Flyer's three add-ons are pre-populated. No other product has add-ons at all. */}
+      {validMode !== 'quote' && (listing?.fixedAddons?.length ?? 0) > 0 && (
         <div>
           <span className="mb-1 block font-display text-[13px] font-bold text-navy">Add-on pricing</span>
           <p className="mb-2.5 text-xs text-black/45">
-            Price the options you offer. Any option a customer picks that you haven&apos;t priced falls back to Request Quote.
+            Leave one blank if you don&apos;t offer it — customers who pick it will see Request Quote.
           </p>
           <div className="space-y-2">
-            {addons.map((a, i) => (
-              <div key={i} className="grid grid-cols-[1fr_1fr_110px_36px] items-center gap-2">
-                <Select aria-label="Option" value={`${a.kind}::${a.label}`}
-                  onChange={(e) => {
-                    const [kind, label] = e.target.value.split('::');
-                    setAddons(addons.map((x, j) => (j === i ? { ...x, kind, label } : x)));
-                  }}>
-                  {addonKinds.flatMap((k) => k.options.map((o) => (
-                    <option key={`${k.kind}::${o}`} value={`${k.kind}::${o}`}>{o}</option>
-                  )))}
-                </Select>
-                {priceInput(a.price, (v) => setAddons(addons.map((x, j) => (j === i ? { ...x, price: v } : x))), '500')}
-                <Select aria-label="Basis" value={a.basis} onChange={(e) => setAddons(addons.map((x, j) => (j === i ? { ...x, basis: e.target.value } : x)))}>
-                  {Object.entries(BASIS_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                </Select>
-                <button aria-label="Remove add-on" onClick={() => setAddons(addons.filter((_, j) => j !== i))} className="text-black/35 hover:text-red">
-                  <Trash2 className="size-4" />
-                </button>
-              </div>
-            ))}
+            {(listing?.fixedAddons ?? []).map((a) => {
+              const key = `${a.kind}::${a.label}`;
+              return (
+                <div key={key} className="grid grid-cols-[1fr_140px_90px] items-center gap-2">
+                  <span className="font-display text-sm font-bold text-navy">{a.label}</span>
+                  {priceInput(addonPrices[key] ?? '', (v) => setAddonPrices((p) => ({ ...p, [key]: v })), '50')}
+                  <span className="font-mono text-[11px] text-black/45">{BASIS_LABEL[a.basis]}</span>
+                </div>
+              );
+            })}
           </div>
-          <Button variant="tertiary" size="sm" className="mt-2.5"
-            onClick={() => setAddons([...addons, { kind: addonKinds[0].kind, label: addonKinds[0].options[0], basis: 'per_piece', price: '' }])}>
-            <Plus className="size-4" /> Price an add-on
-          </Button>
         </div>
       )}
 

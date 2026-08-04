@@ -4,26 +4,25 @@ import { revalidatePath } from 'next/cache';
 import { and, eq } from 'drizzle-orm';
 import { db, tables } from '@/db';
 import { getMyShop } from '@/lib/auth';
-import { getCategory } from '@/lib/categories';
+import { getCategory, getListing, cellKey, gridCells } from '@/lib/categories';
 
 export type ProductPayload = {
   id?: string;
   categorySlug: string;
-  name: string;
+  listingSlug: string;
   pricingMode: string;
-  areaUnit: string | null;
   ratePerUnit: string;
-  minCharge: string;
+  offersHylet: boolean;
   turnaroundHours: string;
   photoUrl: string;
-  tiers: { qty: string; price: string; label: string }[];
-  matrix: { cover: string; size: string; sheets: string; price: string }[];
+  cells: { coords: Record<string, string | number>; price: string }[];
   addons: { kind: string; label: string; basis: string; price: string }[];
 };
 
 const toKobo = (naira: string) => Math.round(Number(naira || 0) * 100);
-// V2: 'per_sheet' (Business Card Print-Only) removed entirely — decision 8.
-const MODES = ['per_area', 'tier', 'fixed_size', 'matrix', 'quote'] as const;
+// 'tier' and 'fixed_size' are legacy V1 shapes and can no longer be saved. 'matrix' is the
+// generic pricing grid — kept as the enum value so no enum migration is needed (QA 1.5).
+const MODES = ['per_area', 'matrix', 'quote'] as const;
 const KINDS = ['lamination', 'gsm', 'corner', 'sides'] as const;
 const BASES = ['per_sheet', 'per_piece', 'flat'] as const;
 
@@ -33,32 +32,45 @@ export async function saveProduct(p: ProductPayload) {
 
   const cat = getCategory(p.categorySlug);
   if (!cat?.live) return { error: 'Unknown category.' };
-  const mode = MODES.includes(p.pricingMode as (typeof MODES)[number]) ? p.pricingMode as (typeof MODES)[number] : 'quote';
+  const listing = getListing(cat, p.listingSlug);
+  if (!listing) return { error: 'Pick a product type.' };
 
-  if (mode === 'per_area' && toKobo(p.ratePerUnit) <= 0) return { error: 'Set a rate for per-area pricing.' };
+  const mode = MODES.includes(p.pricingMode as (typeof MODES)[number])
+    ? (p.pricingMode as (typeof MODES)[number])
+    : 'quote';
 
-  const tiers = p.tiers
-    .filter((t) => Number(t.qty) > 0 && toKobo(t.price) > 0)
-    .map((t) => ({ qty: Number(t.qty), priceKobo: toKobo(t.price), label: t.label.trim() || null }));
-  if (mode === 'tier' && !tiers.length) return { error: 'Add at least one quantity tier with a price.' };
+  if (mode === 'per_area') {
+    if (!listing.perAreaRate) return { error: 'This product is not priced by area.' };
+    if (toKobo(p.ratePerUnit) <= 0) return { error: 'Set a rate per sq.ft.' };
+  }
 
-  const sizes = p.tiers
-    .filter((t) => t.label && toKobo(t.price) > 0)
-    .map((t) => ({ qty: 1, priceKobo: toKobo(t.price), label: t.label }));
-  if (mode === 'fixed_size' && !sizes.length) return { error: 'Price at least one size.' };
+  // Grid rows are validated against the platform's own grid definition, so a tampered payload
+  // can never invent a cell the customer side would not ask for.
+  const grid = listing.pricingGrid;
+  let cellRows: { qty: null; priceKobo: number; label: string; meta: Record<string, string | number> }[] = [];
+  if (mode === 'matrix') {
+    if (!grid) return { error: 'This product has no price grid.' };
+    const allowed = new Set(gridCells(grid).map((c) => cellKey(grid, c)));
+    cellRows = p.cells
+      .filter((c) => toKobo(c.price) > 0 && allowed.has(cellKey(grid, c.coords)))
+      .map((c) => ({
+        qty: null,
+        priceKobo: toKobo(c.price),
+        label: grid.axes.map((a) => String(c.coords[a.key])).join(' / '),
+        meta: Object.fromEntries(grid.axes.map((a) => [a.key, c.coords[a.key]])) as Record<string, string | number>,
+      }));
+    if (!cellRows.length) return { error: 'Price at least one combination, or switch to Request quote.' };
+  }
 
-  const matrix = p.matrix
-    .filter((r) => toKobo(r.price) > 0)
-    .map((r) => ({
-      qty: null,
-      priceKobo: toKobo(r.price),
-      label: `${r.cover} / ${r.size} / ${r.sheets}`,
-      meta: { cover: r.cover, size: r.size, sheets: Number(r.sheets) },
-    }));
-  if (mode === 'matrix' && !matrix.length) return { error: 'Add at least one priced matrix row.' };
-
+  // Only the add-ons this listing actually defines can be saved (QA 3.4: Business Card,
+  // Sticker and Brand Nylon have none at all, so nothing can be attached to them).
+  const allowedAddons = new Set((listing.fixedAddons ?? []).map((a) => `${a.kind}::${a.label}`));
   const addons = p.addons
-    .filter((a) => toKobo(a.price) > 0 && KINDS.includes(a.kind as (typeof KINDS)[number]) && BASES.includes(a.basis as (typeof BASES)[number]))
+    .filter((a) =>
+      toKobo(a.price) > 0
+      && allowedAddons.has(`${a.kind}::${a.label}`)
+      && KINDS.includes(a.kind as (typeof KINDS)[number])
+      && BASES.includes(a.basis as (typeof BASES)[number]))
     .map((a) => ({
       kind: a.kind as (typeof KINDS)[number],
       label: a.label,
@@ -66,14 +78,22 @@ export async function saveProduct(p: ProductPayload) {
       priceKobo: toKobo(a.price),
     }));
 
+  // QA 1.3: the printer no longer types a name — it is derived, so listings stay consistent
+  // across every shop and admin can tell PR-004-A from PR-004-B at a glance.
+  const name = cat.listings.length > 1 ? `${cat.name} — ${listing.label}` : cat.name;
+
   const values = {
     shopId: shop.id,
-    categorySlug: p.categorySlug,
-    name: p.name.slice(0, 120),
+    categorySlug: cat.slug,
+    listingSlug: listing.slug,
+    name,
     pricingMode: mode,
-    areaUnit: mode === 'per_area' ? (p.areaUnit === 'sqin' ? 'sqin' as const : 'sqft' as const) : null,
+    // QA 3.1: sq.ft is the only unit on the platform now.
+    areaUnit: mode === 'per_area' ? ('sqft' as const) : null,
     ratePerUnitKobo: mode === 'per_area' ? toKobo(p.ratePerUnit) : null,
-    minChargeKobo: mode === 'per_area' && toKobo(p.minCharge) > 0 ? toKobo(p.minCharge) : null,
+    // QA 3.1: the minimum-charge field is gone; never write it again.
+    minChargeKobo: null,
+    offersHylet: mode === 'per_area' ? Boolean(p.offersHylet) : false,
     turnaroundHours: Math.max(1, Number(p.turnaroundHours) || 24),
     photoUrl: p.photoUrl || null,
   };
@@ -92,9 +112,8 @@ export async function saveProduct(p: ProductPayload) {
     productId = row.id;
   }
 
-  const variantRows = mode === 'tier' ? tiers : mode === 'fixed_size' ? sizes : mode === 'matrix' ? matrix : [];
-  if (variantRows.length) {
-    await db().insert(tables.productVariants).values(variantRows.map((v) => ({ ...v, productId: productId! })));
+  if (cellRows.length) {
+    await db().insert(tables.productVariants).values(cellRows.map((v) => ({ ...v, productId: productId! })));
   }
   if (addons.length && mode !== 'quote') {
     await db().insert(tables.productAddons).values(addons.map((a) => ({ ...a, productId: productId! })));

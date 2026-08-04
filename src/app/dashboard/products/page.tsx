@@ -12,12 +12,14 @@ import { ToggleActive } from './ToggleActive';
 export const metadata: Metadata = { title: 'Products' };
 
 const MODE_LABEL: Record<string, string> = {
-  per_area: 'Per sq.ft / sq.in',
-  per_sheet: 'Per A4 sheet',
-  tier: 'Quantity tiers',
-  fixed_size: 'Fixed sizes',
-  matrix: 'Price matrix',
+  per_area: 'Per sq.ft',
+  matrix: 'Price grid',
   quote: 'Request quote',
+  // Retired shapes — old rows are deactivated by the QA migration and re-published from the
+  // new grid form, but the label stays so the list never renders a blank.
+  per_sheet: 'Retired — republish',
+  tier: 'Retired — republish',
+  fixed_size: 'Retired — republish',
 };
 
 export default async function ShopProductsPage() {

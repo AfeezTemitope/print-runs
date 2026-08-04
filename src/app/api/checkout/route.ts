@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm';
 import { db, tables } from '@/db';
 import { getSession } from '@/lib/auth';
 import { getCategory } from '@/lib/categories';
-import { computePrice, computeOrderTotals, getPlatformFeeKobo } from '@/lib/pricing';
+import { computePrice, productMatchesSpec, computeOrderTotals, getPlatformFeeKobo } from '@/lib/pricing';
 import { specFromParams } from '@/lib/spec';
 import { paystackInitialize } from '@/lib/paystack';
 import { orderCode } from '@/lib/format';
@@ -66,6 +66,11 @@ export async function POST(req: Request) {
   const [product] = await db().select().from(tables.products).where(eq(tables.products.id, productId)).limit(1);
   if (!shop || !product || product.shopId !== shop.id || !product.isActive) {
     return NextResponse.json({ error: 'That printer or product is no longer available.' }, { status: 404 });
+  }
+  // QA 3.4: listings are separate products, so a Rounded card product must not be able to
+  // settle a Standard card spec even if its id is posted directly.
+  if (!productMatchesSpec(spec, product)) {
+    return NextResponse.json({ error: 'That product does not match the spec you configured.' }, { status: 400 });
   }
 
   const [variants, addons] = await Promise.all([

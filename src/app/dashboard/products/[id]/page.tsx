@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import { and, eq } from 'drizzle-orm';
 import { db, tables } from '@/db';
 import { getMyShop } from '@/lib/auth';
+import { getCategory, getListing, cellKey } from '@/lib/categories';
 import { ProductForm } from '../ProductForm';
 
 export const metadata: Metadata = { title: 'Edit product' };
@@ -22,31 +23,34 @@ export default async function EditProductPage({ params }: { params: Promise<{ id
     db().select().from(tables.productAddons).where(eq(tables.productAddons.productId, p.id)),
   ]);
 
+  const cat = getCategory(p.categorySlug);
+  const listing = cat ? getListing(cat, p.listingSlug ?? undefined) ?? cat.listings[0] : undefined;
+  const grid = listing?.pricingGrid;
+
+  // Saved rows are keyed back onto the grid by their coordinates, so a printer's existing
+  // prices land in the right cells even though the grid is now generated rather than stored.
+  const cellPrices: Record<string, string> = {};
+  if (grid) {
+    for (const v of variants) {
+      const coords = Object.fromEntries(grid.axes.map((a) => [a.key, String(v.meta?.[a.key] ?? '')]));
+      cellPrices[cellKey(grid, coords)] = fromKobo(v.priceKobo);
+    }
+  }
+
   return (
     <div>
       <h1 className="mb-6 font-display text-3xl font-extrabold tracking-tight text-black">Edit product</h1>
       <ProductForm initial={{
         id: p.id,
         categorySlug: p.categorySlug,
-        name: p.name,
+        listingSlug: listing?.slug ?? '',
         pricingMode: p.pricingMode,
-        areaUnit: p.areaUnit,
         ratePerUnit: fromKobo(p.ratePerUnitKobo),
-        minCharge: fromKobo(p.minChargeKobo),
+        offersHylet: p.offersHylet,
         turnaroundHours: String(p.turnaroundHours),
         photoUrl: p.photoUrl ?? '',
-        tiers: p.pricingMode === 'matrix' ? [] : variants.map((v) => ({
-          qty: v.qty ? String(v.qty) : '1',
-          price: fromKobo(v.priceKobo),
-          label: v.label ?? '',
-        })),
-        matrix: p.pricingMode === 'matrix' ? variants.map((v) => ({
-          cover: String(v.meta?.cover ?? 'Soft cover'),
-          size: String(v.meta?.size ?? 'A5'),
-          sheets: String(v.meta?.sheets ?? 40),
-          price: fromKobo(v.priceKobo),
-        })) : [],
-        addons: addons.map((a) => ({ kind: a.kind, label: a.label, basis: a.basis, price: fromKobo(a.priceKobo) })),
+        cellPrices,
+        addonPrices: Object.fromEntries(addons.map((a) => [`${a.kind}::${a.label}`, fromKobo(a.priceKobo)])),
       }} />
     </div>
   );

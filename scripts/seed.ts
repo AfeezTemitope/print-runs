@@ -14,9 +14,61 @@ if (existsSync('.env')) {
   }
 }
 
+// Per-category commercial margin (decisions 16 + 23): ID Card is a flat 200 naira per piece
+// and Business Card is the only percentage margin on the platform, at 7%.
+const MARGINS: Record<string, { marginType: 'fixed' | 'percent'; marginFixedKobo: number; marginPercentBps: number }> = {
+  id_card: { marginType: 'fixed', marginFixedKobo: 20000, marginPercentBps: 0 },
+  business_card: { marginType: 'percent', marginFixedKobo: 0, marginPercentBps: 700 },
+  banner: { marginType: 'fixed', marginFixedKobo: 5000, marginPercentBps: 0 },
+  jotter: { marginType: 'fixed', marginFixedKobo: 5000, marginPercentBps: 0 },
+  thank_you_card: { marginType: 'fixed', marginFixedKobo: 1500, marginPercentBps: 0 },
+};
+
+const AREA_RATE: Record<string, number> = { banner: 1800, sticker: 2400 };
+const TURNAROUND: Record<string, number> = { jotter: 96, nylon: 48, id_card: 48, banner: 24 };
+
+/** Rough naira-per-piece starting points, only ever used to make demo data look plausible. */
+const PER_PIECE: Record<string, number> = {
+  jotter: 900, flyer: 45, business_card: 70, sticker: 90,
+  nylon: 260, thank_you_card: 55, id_card: 700,
+};
+
 async function main() {
   const { db, tables } = await import('../src/db');
+  const { liveListings, gridCells } = await import('../src/lib/categories');
   const k = (naira: number) => naira * 100; // money in kobo
+
+  type Grid = NonNullable<Awaited<ReturnType<typeof liveListings>>[number]['listing']['pricingGrid']>;
+
+  /**
+   * A plausible price for one grid cell. Flat-batch grids get the whole batch total; per-piece
+   * grids get the rate for a single piece. Bigger sizes, heavier stock and double-sided cost
+   * more; bigger batches get a per-piece discount, which is why printers offer tiers at all.
+   */
+  function seedCellKobo(categorySlug: string, grid: Grid, coords: Record<string, string | number>, shopIndex: number): number {
+    let perPiece = (PER_PIECE[categorySlug] ?? 100) * (1 + shopIndex * 0.06);
+    let batchQty = 1;
+
+    for (const axis of grid.axes) {
+      const raw = coords[axis.key];
+      const idx = axis.values.findIndex((v) => String(v) === String(raw));
+      if (axis.source === 'qty') {
+        batchQty = Number(raw);
+        perPiece *= 1 - Math.min(0.3, idx * 0.08);        // volume discount
+      } else if (axis.source === 'qty_range') {
+        perPiece *= 1 - Math.min(0.3, idx * 0.12);
+      } else if (axis.key === 'sides') {
+        if (String(raw) === 'Front and back') perPiece *= 1.55;
+      } else if (axis.source === 'sheets') {
+        perPiece *= 1 + (Number(raw) - Number(axis.values[0])) / 120;
+      } else {
+        perPiece *= 1 + idx * 0.28;                        // size / weight step-ups
+      }
+    }
+
+    const naira = grid.priceType === 'flat_batch' ? perPiece * batchQty : perPiece;
+    return Math.round(naira) * 100;
+  }
 
   const hash = await bcrypt.hash('password123', 10);
 
@@ -50,158 +102,53 @@ async function main() {
 
     console.log(`Seeding products for ${p.name}…`);
 
-    // Banner — per sq.ft (all four shops, slightly different rates)
-    await db().insert(tables.products).values({
-      shopId: shop.id, categorySlug: 'banner', name: 'Vinyl Flex Banner',
-      pricingMode: 'per_area', areaUnit: 'sqft',
-      ratePerUnitKobo: k(1600 + i * 150), minChargeKobo: k(3500), turnaroundHours: 24,
-    });
+    // Products are generated FROM the category config rather than hand-listed, so the seed can
+    // never drift out of sync with the grids the printer form and pricing engine agree on.
+    for (const { category, listing } of liveListings()) {
+      // Shop 4 leaves Thank You Card unpriced so the Request Quote path stays visible in demo
+      // data, and nobody assumes every printer prices everything.
+      const quoteOnly = i === 3 && category.slug === 'thank_you_card';
 
-    // Sticker — per sq.in
-    await db().insert(tables.products).values({
-      shopId: shop.id, categorySlug: 'sticker', name: 'Custom Cut Stickers',
-      pricingMode: 'per_area', areaUnit: 'sqin',
-      ratePerUnitKobo: k(40 + i * 5), minChargeKobo: k(150), turnaroundHours: 24,
-    });
+      const margin = MARGINS[category.slug] ?? { marginType: 'fixed' as const, marginFixedKobo: k(25), marginPercentBps: 0 };
+      const mode = quoteOnly ? 'quote' : listing.perAreaRate ? 'per_area' : listing.pricingGrid ? 'matrix' : 'quote';
 
-    // Flyer — qty tiers matching the configurator presets, + addons
-    const [flyer] = await db().insert(tables.products).values({
-      shopId: shop.id, categorySlug: 'flyer', name: 'A5 Flyers',
-      pricingMode: 'tier', turnaroundHours: 24,
-    }).returning();
-    await db().insert(tables.productVariants).values([
-      { productId: flyer.id, qty: 50, priceKobo: k(9000 + i * 500), label: 'A5, 130gsm' },
-      { productId: flyer.id, qty: 100, priceKobo: k(15000 + i * 800), label: 'A5, 130gsm' },
-      { productId: flyer.id, qty: 250, priceKobo: k(32000 + i * 1500), label: 'A5, 130gsm' },
-      { productId: flyer.id, qty: 500, priceKobo: k(55000 + i * 2500), label: 'A5, 130gsm' },
-      { productId: flyer.id, qty: 1000, priceKobo: k(95000 + i * 4000), label: 'A5, 130gsm' },
-    ]);
-    await db().insert(tables.productAddons).values([
-      { productId: flyer.id, kind: 'sides', label: 'Front and back', basis: 'per_piece', priceKobo: k(30) },
-      { productId: flyer.id, kind: 'lamination', label: 'Matte', basis: 'per_piece', priceKobo: k(20) },
-      { productId: flyer.id, kind: 'lamination', label: 'Gloss', basis: 'per_piece', priceKobo: k(20) },
-    ]);
-
-    // Business cards:
-    if (i === 2) {
-      // Surulere: quote-only for business cards — demos the dashed Request Quote card
-      await db().insert(tables.products).values({
-        shopId: shop.id, categorySlug: 'business_card', name: 'Business Cards (custom jobs)',
-        pricingMode: 'quote', turnaroundHours: 48,
-      });
-    } else {
-      // Print + Cut tiers
-      // Decision 23: Business Card carries a 7% percentage margin (700 bps), unlike every
-      // other category, which uses a fixed naira amount.
-      const [bc] = await db().insert(tables.products).values({
-        shopId: shop.id, categorySlug: 'business_card', name: 'Business Cards',
-        pricingMode: 'tier', turnaroundHours: 24,
-        marginType: 'percent', marginPercentBps: 700,
+      const [prod] = await db().insert(tables.products).values({
+        shopId: shop.id,
+        categorySlug: category.slug,
+        listingSlug: listing.slug,
+        name: category.listings.length > 1 ? `${category.name} — ${listing.label}` : category.name,
+        pricingMode: mode,
+        areaUnit: mode === 'per_area' ? ('sqft' as const) : null,
+        ratePerUnitKobo: mode === 'per_area' ? k(AREA_RATE[category.slug] ?? 1800) + k(i * 120) : null,
+        offersHylet: mode === 'per_area' && category.slug === 'banner' ? i !== 2 : false,
+        turnaroundHours: TURNAROUND[category.slug] ?? 24,
+        ...margin,
       }).returning();
-      await db().insert(tables.productVariants).values([
-        { productId: bc.id, qty: 100, priceKobo: k(15000 + i * 1000), label: '350gsm matte' },
-        { productId: bc.id, qty: 250, priceKobo: k(30000 + i * 1500), label: '350gsm matte' },
-        { productId: bc.id, qty: 500, priceKobo: k(52000 + i * 2000), label: '350gsm matte' },
-        { productId: bc.id, qty: 1000, priceKobo: k(90000 + i * 3000), label: '350gsm matte' },
-      ]);
-      await db().insert(tables.productAddons).values([
-        { productId: bc.id, kind: 'gsm', label: '300gsm', basis: 'per_piece', priceKobo: k(5) },
-        { productId: bc.id, kind: 'gsm', label: '350gsm', basis: 'per_piece', priceKobo: k(10) },
-        { productId: bc.id, kind: 'corner', label: 'Rounded', basis: 'per_piece', priceKobo: k(8) },
-        { productId: bc.id, kind: 'lamination', label: 'Matte', basis: 'per_piece', priceKobo: k(12) },
-        { productId: bc.id, kind: 'lamination', label: 'Gloss', basis: 'per_piece', priceKobo: k(12) },
-        { productId: bc.id, kind: 'sides', label: 'Front and back', basis: 'per_piece', priceKobo: k(10) },
-      ]);
 
-    }
-
-    // Two shops get frames (fixed sizes)
-    if (i % 2 === 0) {
-      const [frame] = await db().insert(tables.products).values({
-        // Frame is locked/hidden in V2 (founder decisions) — seeded inactive so the data
-        // shape is still exercised without the product reaching a customer.
-        shopId: shop.id, categorySlug: 'frame', name: 'Framed Prints', isActive: false,
-        pricingMode: 'fixed_size', turnaroundHours: 48,
-      }).returning();
-      await db().insert(tables.productVariants).values([
-        { productId: frame.id, qty: 1, priceKobo: k(9500 + i * 500), label: 'A4' },
-        { productId: frame.id, qty: 1, priceKobo: k(14500 + i * 500), label: 'A3' },
-        { productId: frame.id, qty: 1, priceKobo: k(22000 + i * 500), label: 'A2' },
-      ]);
-    }
-
-    // Two shops get jotters (matrix)
-    if (i === 1 || i === 3) {
-      const [jotter] = await db().insert(tables.products).values({
-        shopId: shop.id, categorySlug: 'jotter', name: 'Custom Jotters',
-        pricingMode: 'matrix', turnaroundHours: 96,
-      }).returning();
-      const rows: { cover: string; size: string; sheets: number; price: number }[] = [];
-      for (const cover of ['Soft cover', 'Hard cover']) {
-        for (const size of ['A6', 'A5']) {
-          for (const sheets of [50, 75, 100]) {
-            const base = cover === 'Hard cover' ? 900 : 550;
-            const sizeAdd = size === 'A5' ? 200 : 0;
-            rows.push({ cover, size, sheets, price: base + sizeAdd + sheets * 5 + i * 50 });
-          }
-        }
+      if (mode === 'matrix' && listing.pricingGrid) {
+        const grid = listing.pricingGrid;
+        const rows = gridCells(grid).map((coords) => ({
+          productId: prod.id,
+          qty: null,
+          priceKobo: seedCellKobo(category.slug, grid, coords, i),
+          label: grid.axes.map((a) => String(coords[a.key])).join(' / '),
+          meta: coords,
+        }));
+        // Shop 3 skips the priciest combination of each grid — a real gap, so the "falls back
+        // to Request Quote" behaviour is exercised by the demo data rather than only by tests.
+        const kept = i === 2 ? rows.slice(0, -1) : rows;
+        if (kept.length) await db().insert(tables.productVariants).values(kept);
       }
-      await db().insert(tables.productVariants).values(rows.map((r) => ({
-        productId: jotter.id, qty: null, priceKobo: k(r.price),
-        label: `${r.cover} / ${r.size} / ${r.sheets}`,
-        meta: { cover: r.cover, size: r.size, sheets: r.sheets },
-      })));
-    }
 
-    // Thank You Card — new in V2. Fixed naira margin like most categories.
-    const [tyc] = await db().insert(tables.products).values({
-      shopId: shop.id, categorySlug: 'thank_you_card', name: 'Thank You Cards',
-      pricingMode: 'tier', turnaroundHours: 24,
-      marginType: 'fixed', marginFixedKobo: k(15),
-    }).returning();
-    await db().insert(tables.productVariants).values([
-      { productId: tyc.id, qty: 50, priceKobo: k(7000 + i * 400), label: '300gsm' },
-      { productId: tyc.id, qty: 100, priceKobo: k(12000 + i * 700), label: '300gsm' },
-      { productId: tyc.id, qty: 250, priceKobo: k(26000 + i * 1200), label: '300gsm' },
-      { productId: tyc.id, qty: 500, priceKobo: k(46000 + i * 2000), label: '300gsm' },
-      { productId: tyc.id, qty: 1000, priceKobo: k(82000 + i * 3500), label: '300gsm' },
-    ]);
-    await db().insert(tables.productAddons).values([
-      { productId: tyc.id, kind: 'lamination', label: 'Matte', basis: 'per_piece', priceKobo: k(10) },
-      { productId: tyc.id, kind: 'lamination', label: 'Gloss', basis: 'per_piece', priceKobo: k(10) },
-      { productId: tyc.id, kind: 'sides', label: 'Front and back', basis: 'per_piece', priceKobo: k(15) },
-    ]);
-
-    // ID Card — new in V2. Decision 16: 200 naira FIXED margin per piece, the big outlier
-    // against every other category's 10-50 naira. Confirmed intentional, not a typo for 25.
-    const [idc] = await db().insert(tables.products).values({
-      shopId: shop.id, categorySlug: 'id_card', name: 'ID Cards',
-      pricingMode: 'tier', turnaroundHours: 48,
-      marginType: 'fixed', marginFixedKobo: k(200),
-    }).returning();
-    await db().insert(tables.productVariants).values([
-      { productId: idc.id, qty: 10, priceKobo: k(6000 + i * 300), label: 'PVC' },
-      { productId: idc.id, qty: 25, priceKobo: k(13000 + i * 600), label: 'PVC' },
-      { productId: idc.id, qty: 50, priceKobo: k(24000 + i * 1000), label: 'PVC' },
-      { productId: idc.id, qty: 100, priceKobo: k(45000 + i * 1800), label: 'PVC' },
-      { productId: idc.id, qty: 250, priceKobo: k(105000 + i * 4000), label: 'PVC' },
-    ]);
-
-    // One shop gets nylon tiers
-    if (i === 3) {
-      const [nylon] = await db().insert(tables.products).values({
-        shopId: shop.id, categorySlug: 'nylon', name: 'Branded Nylon Bags',
-        pricingMode: 'tier', turnaroundHours: 48,
-      }).returning();
-      await db().insert(tables.productVariants).values([
-        { productId: nylon.id, qty: 50, priceKobo: k(18000), label: 'Medium' },
-        { productId: nylon.id, qty: 100, priceKobo: k(32000), label: 'Medium' },
-        { productId: nylon.id, qty: 250, priceKobo: k(70000), label: 'Medium' },
-        { productId: nylon.id, qty: 500, priceKobo: k(125000), label: 'Medium' },
-      ]);
-      await db().insert(tables.productAddons).values([
-        { productId: nylon.id, kind: 'sides', label: 'Front and back', basis: 'per_piece', priceKobo: k(40) },
-      ]);
+      if (mode !== 'quote' && listing.fixedAddons?.length) {
+        await db().insert(tables.productAddons).values(listing.fixedAddons.map((a) => ({
+          productId: prod.id,
+          kind: a.kind as 'lamination' | 'gsm' | 'corner' | 'sides',
+          basis: a.basis,
+          label: a.label,
+          priceKobo: k(a.label === 'Front and back' ? 15 : 10),
+        })));
+      }
     }
   }
 

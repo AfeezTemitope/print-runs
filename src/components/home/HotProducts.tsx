@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { CATEGORIES, productCode } from '@/lib/categories';
+import { CATEGORIES, productCode, categoryMoq } from '@/lib/categories';
 import { Glyph } from '@/components/ui/Glyph';
 import { CodeBadge } from '@/components/ui/CodeBadge';
 
@@ -33,9 +33,9 @@ export function HotProducts() {
                       <span className="rounded-pill bg-blue px-2.5 py-1 font-mono text-[9px] font-bold uppercase tracking-wider text-white">
                         Ready in {c.turnaround}
                       </span>
-                      {c.moq && (
+                      {categoryMoq(c) && (
                         <span className="rounded-pill border border-black/20 px-2.5 py-1 font-mono text-[9px] font-bold uppercase tracking-wider text-navy">
-                          MOQ {c.moq}
+                          MOQ {categoryMoq(c)}
                         </span>
                       )}
                     </div>

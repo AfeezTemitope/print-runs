@@ -151,13 +151,23 @@ export const products = pgTable('products', {
   id: uuid('id').primaryKey().defaultRandom(),
   shopId: uuid('shop_id').notNull().references(() => shops.id, { onDelete: 'cascade' }),
   categorySlug: text('category_slug').notNull(),
+  /**
+   * QA 3.4: where a category has more than one listing (Sticker → Round Cut, Business Card →
+   * Rounded), each listing is its OWN product row with its OWN pricing grid. Null on legacy
+   * rows created before listings existed.
+   */
+  listingSlug: text('listing_slug'),
   name: text('name').notNull(),
   description: text('description'),
   photoUrl: text('photo_url'),
   pricingMode: pricingMode('pricing_mode').notNull(),
   areaUnit: areaUnit('area_unit'),
   ratePerUnitKobo: integer('rate_per_unit_kobo'),
+  // QA 3.1 removed the minimum-charge field from the printer UI. The column stays so old rows
+  // are not destroyed, but nothing writes it and the pricing engine no longer reads it.
   minChargeKobo: integer('min_charge_kobo'),
+  // QA 3.1: Banner only — does this printer offer hylet? Always free, so there is no price.
+  offersHylet: boolean('offers_hylet').notNull().default(false),
   // V2 margin (decision 1, 2, 16, 23)
   marginType: marginType('margin_type').notNull().default('fixed'),
   marginFixedKobo: integer('margin_fixed_kobo').notNull().default(0),
@@ -168,6 +178,7 @@ export const products = pgTable('products', {
 }, (t) => [
   index('products_shop_idx').on(t.shopId),
   index('products_cat_active_idx').on(t.categorySlug, t.isActive),
+  index('products_cat_listing_idx').on(t.categorySlug, t.listingSlug, t.isActive),
 ]);
 
 /* ------------------------------------------------------------------ */
@@ -206,16 +217,14 @@ export const productAddons = pgTable('product_addons', {
 
 export type OrderSpec = {
   category: string;
-  variant?: string;         // V2: chosen variant under the category
+  listing?: string;         // QA: the customer-visible type within the category
   qty?: number;
   width?: number;
   height?: number;
   unit?: string;
   sizeLabel?: string;
-  serviceType?: string;
-  cover?: string;
-  jSize?: string;
   sheets?: number;
+  options?: Record<string, string>;
   addons?: Record<string, string>;
   printNote?: string;
   breakdown?: { label: string; amountKobo: number }[];
