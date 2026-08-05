@@ -14,7 +14,9 @@
     "db:check": "tsx scripts/db-check.ts",
     "test:pricing": "tsx scripts/test-pricing.ts",
     "seed": "tsx scripts/seed.ts",
-    "db:reset": "tsx scripts/db-reset.ts"
+    "db:reset": "tsx scripts/db-reset.ts",
+    "make-admin": "tsx scripts/make-admin.ts",
+    "test:email": "tsx scripts/test-email.ts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.0.0",

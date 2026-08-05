@@ -1,5 +1,7 @@
 'use client';
 
+import Link from 'next/link';
+
 import { useState } from 'react';
 import { Bike } from 'lucide-react';
 import { naira } from '@/lib/format';
@@ -30,6 +32,7 @@ export function CheckoutClient({ shop, categoryName, isQuote, lines, sellingPric
   const [phonePrimary, setPhonePrimary] = useState('');
   const [phoneSecondary, setPhoneSecondary] = useState('');
   const [designConfirmed, setDesignConfirmed] = useState(false);
+  const [legalAccepted, setLegalAccepted] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -38,7 +41,8 @@ export function CheckoutClient({ shop, categoryName, isQuote, lines, sellingPric
     email.trim().includes('@') &&
     phonePrimary.trim().length >= 7 &&
     phoneSecondary.trim().length >= 7 &&
-    designConfirmed;
+    designConfirmed &&
+    legalAccepted;
 
   async function pay() {
     setBusy(true);
@@ -54,6 +58,7 @@ export function CheckoutClient({ shop, categoryName, isQuote, lines, sellingPric
         contactPhonePrimary: phonePrimary,
         contactPhoneSecondary: phoneSecondary,
         designConfirmed: designConfirmed ? 'true' : 'false',
+        legalAccepted: legalAccepted ? 'true' : 'false',
       }),
     });
     const json = await res.json();
@@ -150,6 +155,25 @@ export function CheckoutClient({ shop, categoryName, isQuote, lines, sellingPric
           <span className="text-sm leading-relaxed text-black/70">
             I confirm the artwork I&apos;ve provided is final and ready to print. I understand PrintRuns and
             the printer are not responsible for errors that were visible in what I approved.
+          </span>
+        </label>
+
+        {/* Separate from the artwork confirmation on purpose: bundling "my file is correct"
+            with "I accept your terms" makes a single tick do two very different jobs. */}
+        <label className="mt-3.5 flex items-start gap-3 border-t border-dashed border-black/20 pt-3.5">
+          <input
+            type="checkbox"
+            checked={legalAccepted}
+            onChange={(e) => setLegalAccepted(e.target.checked)}
+            className="mt-0.5 size-4 accent-blue"
+          />
+          <span className="text-sm leading-relaxed text-black/70">
+            I accept the{' '}
+            <Link href="/legal/terms" target="_blank" className="font-semibold text-blue underline">Terms &amp; Conditions</Link>,{' '}
+            <Link href="/legal/privacy" target="_blank" className="font-semibold text-blue underline">Privacy Policy</Link>,{' '}
+            <Link href="/legal/refunds" target="_blank" className="font-semibold text-blue underline">Refund &amp; Cancellation Policy</Link>{' '}
+            and{' '}
+            <Link href="/legal/acceptable-use" target="_blank" className="font-semibold text-blue underline">Acceptable Use Policy</Link>.
           </span>
         </label>
       </section>

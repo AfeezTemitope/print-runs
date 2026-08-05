@@ -47,3 +47,34 @@ export async function paystackVerify(reference: string) {
     metadata: Record<string, unknown> | null;
   };
 }
+
+/**
+ * Issue a refund. Omit amountKobo for a full refund; pass it for a partial one (the
+ * refund-less-production-costs case).
+ *
+ * Never throws — the caller has already decided to cancel, and a Paystack outage must not
+ * leave the order in limbo. A failure comes back as { ok: false } so the cancellation is
+ * still recorded and ops is told to finish the refund by hand.
+ */
+export async function paystackRefund(reference: string, amountKobo?: number): Promise<
+  | { ok: true; status: string }
+  | { ok: false; message: string }
+> {
+  if (!process.env.PAYSTACK_SECRET_KEY) return { ok: false, message: 'Paystack is not configured.' };
+  try {
+    const res = await fetch(`${BASE}/refund`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key()}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        transaction: reference,
+        ...(amountKobo != null ? { amount: amountKobo } : {}),
+      }),
+      cache: 'no-store',
+    });
+    const json = await res.json();
+    if (!res.ok || !json.status) return { ok: false, message: json.message ?? 'Paystack refused the refund.' };
+    return { ok: true, status: (json.data?.status as string) ?? 'pending' };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : 'Could not reach Paystack.' };
+  }
+}

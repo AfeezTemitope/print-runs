@@ -93,3 +93,45 @@ export function isSettlementEligible(status: OrderStatus, method: FulfillmentMet
   if (method === 'collection' && status === 'ready_for_dispatch') return true;
   return false;
 }
+
+/* ------------------------------------------------------------------ */
+/* Delivery fee gate                                                   */
+/* ------------------------------------------------------------------ */
+
+export type DeliveryFeeStatus = (typeof orders.$inferSelect)['deliveryFeeStatus'];
+
+/**
+ * A delivery order may only leave the shop once the customer has agreed to the fee, because
+ * they pay the rider in cash on arrival — dispatching before that risks a wasted trip with a
+ * printed job that cannot be resold. Collection orders never involve a fee at all.
+ */
+export function canDispatch(
+  method: FulfillmentMethod,
+  status: OrderStatus,
+  feeStatus: DeliveryFeeStatus,
+): boolean {
+  if (method === 'collection') return false;
+  if (status !== 'ready_for_dispatch') return false;
+  return feeStatus === 'accepted';
+}
+
+/** Why dispatch is blocked, in words the printer can act on. */
+export function dispatchBlockedReason(
+  method: FulfillmentMethod,
+  status: OrderStatus,
+  feeStatus: DeliveryFeeStatus,
+): string | null {
+  if (method === 'collection') return 'The customer is sending their own rider — use Confirm handover.';
+  if (status !== 'ready_for_dispatch') return 'Mark the job ready for dispatch first.';
+  if (feeStatus === 'not_set') return 'Set your delivery fee so PrintRuns can confirm it with the customer.';
+  if (feeStatus === 'quoted') return 'Waiting for PrintRuns to confirm the fee with the customer.';
+  if (feeStatus === 'declined') return 'The customer declined the fee — this order is switching to Collection.';
+  return null;
+}
+
+/** A printer can name or revise the fee any time after the job is under way, until it ships. */
+export function canSetDeliveryFee(method: FulfillmentMethod, status: OrderStatus): boolean {
+  if (method === 'collection') return false;
+  return ['order_received', 'printer_assigned', 'printing_in_progress', 'printing_completed', 'ready_for_dispatch']
+    .includes(status);
+}

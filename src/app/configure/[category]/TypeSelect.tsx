@@ -1,14 +1,15 @@
 import Link from 'next/link';
 import type { Category } from '@/lib/categories';
-import { Glyph } from '@/components/ui/Glyph';
+import { ProductImage } from '@/components/ui/ProductImage';
 import { CodeBadge } from '@/components/ui/CodeBadge';
+import { pickPhoto, type PhotoMap } from '@/lib/photos';
 
 /**
  * QA 1.1 — the page that was missing. A category with more than one type lands here first:
  * one photo-led card per type, and only after choosing does the customer reach the
  * configurator. Real photography replaces the glyph panel when it lands (QA 1.8).
  */
-export function TypeSelect({ category }: { category: Category }) {
+export function TypeSelect({ category, photos }: { category: Category; photos: PhotoMap }) {
   return (
     <div className="mx-auto max-w-5xl px-4 py-10 sm:px-6">
       <p className="font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-blue">Choose a type</p>
@@ -22,9 +23,14 @@ export function TypeSelect({ category }: { category: Category }) {
               href={`/configure/${category.slug}/${l.slug}`}
               className="group flex h-full flex-col overflow-hidden rounded-2xl border border-black/12 bg-white transition-all hover:-translate-y-0.5 hover:border-blue"
             >
-              <div className="grid place-items-center bg-pale/40 py-12">
-                <Glyph kind={category.glyph} color={category.hue} className="size-24" />
-              </div>
+              <ProductImage
+                url={pickPhoto(photos, category.slug, l.slug)}
+                glyph={category.glyph}
+                hue={category.hue}
+                alt={`${category.name} — ${l.label}`}
+                className="aspect-[4/3] bg-pale/40"
+                glyphClassName="size-24"
+              />
               <div className="flex flex-1 flex-col gap-2 p-5">
                 <div className="flex items-start justify-between gap-2">
                   <h2 className="font-display text-xl font-extrabold tracking-tight text-navy">{l.label}</h2>

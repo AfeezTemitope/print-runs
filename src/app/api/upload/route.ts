@@ -3,7 +3,15 @@ import { getSession } from '@/lib/auth';
 import { cloudinaryConfigured, uploadDesignFile } from '@/lib/cloudinary';
 
 const MAX_BYTES = 20 * 1024 * 1024;
-const OK_TYPES = ['application/pdf', 'image/png', 'image/jpeg', 'application/postscript', 'application/illustrator'];
+// CorelDraw files report inconsistent MIME types across browsers (and often none at all), so
+// .cdr and .ai are accepted by extension rather than by type. QA 1.6 added CDR platform-wide;
+// the file picker allowed it before this route did.
+const OK_TYPES = [
+  'application/pdf', 'image/png', 'image/jpeg',
+  'application/postscript', 'application/illustrator',
+  'application/x-coreldraw', 'application/cdr', 'image/x-coreldraw',
+];
+const OK_EXTENSIONS = ['.ai', '.cdr'];
 
 export async function POST(req: Request) {
   const session = await getSession();
@@ -20,8 +28,9 @@ export async function POST(req: Request) {
   const file = form.get('file');
   if (!(file instanceof File)) return NextResponse.json({ error: 'No file received.' }, { status: 400 });
   if (file.size > MAX_BYTES) return NextResponse.json({ error: 'File is over 20MB.' }, { status: 413 });
-  if (file.type && !OK_TYPES.includes(file.type) && !file.name.toLowerCase().endsWith('.ai')) {
-    return NextResponse.json({ error: 'Use PDF, AI, PNG or JPG.' }, { status: 415 });
+  const byExtension = OK_EXTENSIONS.some((ext) => file.name.toLowerCase().endsWith(ext));
+  if (file.type && !OK_TYPES.includes(file.type) && !byExtension) {
+    return NextResponse.json({ error: 'Use PDF, AI, CDR, PNG or JPG.' }, { status: 415 });
   }
 
   try {

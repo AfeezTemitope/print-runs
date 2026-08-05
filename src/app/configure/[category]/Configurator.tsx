@@ -16,7 +16,9 @@ import { Field, Input, Select, Textarea } from '@/components/ui/Field';
  * screen. After QA Round 1 the configurator is per LISTING, not per category — the type was
  * already chosen on the page before this one, so there is no type switcher in here.
  */
-export function Configurator({ category, listing }: { category: Category; listing: Listing }) {
+export function Configurator({
+  category, listing, photoUrl,
+}: { category: Category; listing: Listing; photoUrl?: string }) {
   const router = useRouter();
 
   const sizeCfg = listing.size;
@@ -298,9 +300,16 @@ export function Configurator({ category, listing }: { category: Category; listin
             <p className="font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-pale">Your spec</p>
             <CodeBadge code={listing.code} tone="light" />
           </div>
-          <div className="mt-4 grid place-items-center rounded-xl border border-white/20 bg-white/5 py-8">
-            <Glyph kind={category.glyph} color="#FFFBB5" className="size-20" />
-          </div>
+          {photoUrl ? (
+            <div className="relative mt-4 aspect-[4/3] overflow-hidden rounded-xl border border-white/20">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={photoUrl} alt={`${category.name} — ${listing.label}`} className="size-full object-cover" />
+            </div>
+          ) : (
+            <div className="mt-4 grid place-items-center rounded-xl border border-white/20 bg-white/5 py-8">
+              <Glyph kind={category.glyph} color="#FFFBB5" className="size-20" />
+            </div>
+          )}
           <dl className="mt-4 space-y-0 font-mono text-[13px]">
             <div className="flex justify-between border-b border-dashed border-white/20 py-2.5">
               <dt className="text-white/55">Item</dt>

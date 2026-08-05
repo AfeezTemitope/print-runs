@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { getCategory, LIVE_CATEGORIES, needsTypeSelection } from '@/lib/categories';
+import { getCatalogPhotos, pickPhoto } from '@/lib/photos';
 import { Configurator } from './Configurator';
 import { TypeSelect } from './TypeSelect';
 
@@ -26,6 +27,13 @@ export default async function ConfigurePage({ params }: { params: Promise<{ cate
 
   // QA 1.1: more than one type → the photo-led type-selection page comes first. A single-type
   // category has nothing to choose, so it goes straight to the configurator.
-  if (needsTypeSelection(cat)) return <TypeSelect category={cat} />;
-  return <Configurator category={cat} listing={cat.listings[0]} />;
+  const photos = await getCatalogPhotos();
+  if (needsTypeSelection(cat)) return <TypeSelect category={cat} photos={photos} />;
+  return (
+    <Configurator
+      category={cat}
+      listing={cat.listings[0]}
+      photoUrl={pickPhoto(photos, cat.slug, cat.listings[0].slug)}
+    />
+  );
 }

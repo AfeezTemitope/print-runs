@@ -96,10 +96,23 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
           </p>
         )}
         {order.deliveryFeeKobo != null && (
-          <div className="mt-3 flex justify-between rounded-xl bg-pale/40 px-4 py-3 text-[13px] text-navy">
-            <span>Delivery fee (charged separately)</span>
-            <span className="font-display font-extrabold">{naira(order.deliveryFeeKobo)}</span>
+          <div className="mt-3 rounded-xl bg-pale/40 px-4 py-3 text-[13px] text-navy">
+            <div className="flex justify-between">
+              <span>Delivery fee — paid in cash to the rider</span>
+              <span className="font-display font-extrabold">{naira(order.deliveryFeeKobo)}</span>
+            </div>
+            <p className="mt-1 text-xs text-black/60">
+              {order.deliveryFeeStatus === 'accepted'
+                ? 'Have this ready for the rider when they arrive. It is not charged to your card.'
+                : 'A PrintRuns representative will call to confirm this before your order is dispatched.'}
+            </p>
           </div>
+        )}
+        {order.fulfillmentMethod === 'collection' && order.collectionAuthorizedName && (
+          <p className="mt-3 rounded-xl bg-pale/40 px-4 py-3 text-[13px] leading-relaxed text-navy">
+            Your order is being collected by <strong>{order.collectionAuthorizedName}</strong>
+            {' '}({order.collectionAuthorizedPhone}). The printer will only release it to them.
+          </p>
         )}
         {order.refundStatus !== 'none' && (
           <p className="mt-3 rounded-xl border border-red/30 bg-red/5 px-4 py-3 text-[13px] leading-relaxed text-red">

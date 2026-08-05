@@ -4,6 +4,8 @@ import { db, tables } from '@/db';
 import { getSession } from '@/lib/auth';
 import { getCategory } from '@/lib/categories';
 import { computePrice, productMatchesSpec, computeOrderTotals, getPlatformFeeKobo } from '@/lib/pricing';
+import { getCategoryMargins, marginFor } from '@/lib/margins';
+import { LEGAL_VERSION } from '@/lib/legal';
 import { specFromParams } from '@/lib/spec';
 import { paystackInitialize } from '@/lib/paystack';
 import { orderCode } from '@/lib/format';
@@ -62,6 +64,12 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Please confirm your artwork is final and ready to print.' }, { status: 400 });
   }
 
+  // Legal acceptance. Checked server-side, not just in the browser, so consent is a fact
+  // about the request rather than a checkbox someone can skip past.
+  if (body.legalAccepted !== 'true') {
+    return NextResponse.json({ error: 'Please accept the Terms and policies to continue.' }, { status: 400 });
+  }
+
   const [shop] = await db().select().from(tables.shops).where(eq(tables.shops.id, shopId)).limit(1);
   const [product] = await db().select().from(tables.products).where(eq(tables.products.id, productId)).limit(1);
   if (!shop || !product || product.shopId !== shop.id || !product.isActive) {
@@ -111,11 +119,12 @@ export async function POST(req: Request) {
 
   // Priced order: compute the full 3-layer total, then hand everything to Paystack as
   // metadata. Nothing is written to the orders table in this branch — see settle.ts.
+  const margins = await getCategoryMargins();
   const platformFeeKobo = await getPlatformFeeKobo((key) =>
     db().select().from(tables.platformSettings).where(eq(tables.platformSettings.key, key)).limit(1)
       .then((rows) => rows[0]),
   );
-  const totals = computeOrderTotals(price.totalKobo, spec.qty ?? 1, product, platformFeeKobo);
+  const totals = computeOrderTotals(price.totalKobo, spec.qty ?? 1, marginFor(margins, product.categorySlug, product), platformFeeKobo);
 
   const metadata: PendingOrderMetadata = {
     customerId: user.id,
@@ -134,6 +143,7 @@ export async function POST(req: Request) {
     designFileUrl: body.file || null,
     designFileName: body.fileName || null,
     printNote: body.note?.trim() || null,
+    legalVersionAccepted: LEGAL_VERSION,
   };
 
   const origin = process.env.NEXT_PUBLIC_APP_URL ?? new URL(req.url).origin;

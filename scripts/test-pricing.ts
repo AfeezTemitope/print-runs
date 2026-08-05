@@ -3,12 +3,21 @@
    numbers the founder decisions specify, not just that it type-checks. */
 
 import { computeMargin, computeOrderTotals, computePrice, DEFAULT_PLATFORM_FEE_KOBO } from '../src/lib/pricing';
-import { stepsFor, statusLabel, canDecline, isSettlementEligible, QUEUE_STATUSES } from '../src/lib/status';
+import {
+  stepsFor, statusLabel, canDecline, isSettlementEligible, QUEUE_STATUSES,
+  canDispatch, canSetDeliveryFee, dispatchBlockedReason,
+} from '../src/lib/status';
 import {
   CATEGORIES, LIVE_CATEGORIES, getCategory, getListing, needsTypeSelection,
   gridCellCount, gridCells, cellKey, matchQtyRange, productCode,
 } from '../src/lib/categories';
 import type { PricingGrid } from '../src/lib/categories';
+import { readFileSync } from 'node:fs';
+import { photoKey, pickPhoto } from '../src/lib/photos';
+import { marginFor } from '../src/lib/margins';
+import { isVerified } from '../src/lib/verification';
+import { emailConfigured, sendEmail } from '../src/lib/email';
+import { LEGAL_DOCS, LEGAL_VERSION, getLegalDoc, readLegalDoc, parseLegal, inlineSegments } from '../src/lib/legal';
 
 let pass = 0;
 let fail = 0;
@@ -332,5 +341,134 @@ eq('every exact qty tier is offered to the customer',
 eq('Business Card qty tiers deliberately do NOT line up',
   getCategory('business_card')!.listings.every(qtyCovered), false);
 
-console.log(`\n${pass} passed, ${fail} failed\n`);
-process.exit(fail === 0 ? 0 : 1);
+console.log('\nCatalog photo keys');
+eq('category key has no colon', photoKey('sticker'), 'sticker');
+eq('listing key is category:listing', photoKey('sticker', 'round'), 'sticker:round');
+eq('a null listing falls back to the category key', photoKey('sticker', null), 'sticker');
+// A listing photo wins; the category photo is the fallback; the glyph is the last resort.
+const pm = { sticker: 'CAT', 'sticker:round': 'ROUND' };
+eq('listing photo wins', pickPhoto(pm, 'sticker', 'round'), 'ROUND');
+eq('falls back to the category photo', pickPhoto(pm, 'sticker', 'straight'), 'CAT');
+eq('nothing at all returns undefined', pickPhoto({}, 'sticker', 'round'), undefined);
+// Every slot the admin screen offers must be a key the customer pages actually read.
+const adminSlots = LIVE_CATEGORIES.flatMap((c) => [
+  photoKey(c.slug),
+  ...(c.listings.length > 1 ? c.listings.map((l) => photoKey(c.slug, l.slug)) : []),
+]);
+eq('no duplicate admin photo slots', new Set(adminSlots).size, adminSlots.length);
+eq('every slot resolves back to a live listing or category',
+  adminSlots.every((k) => {
+    const [cat, listing] = k.split(':');
+    const c = getCategory(cat);
+    return Boolean(c?.live) && (!listing || Boolean(getListing(c!, listing)));
+  }), true);
+
+console.log('\nDelivery fee gate (cash to the rider on arrival)');
+// The whole point: a rider must never ride out to a customer who has not agreed to pay.
+eq('cannot dispatch before a fee is named', canDispatch('delivery', 'ready_for_dispatch', 'not_set'), false);
+eq('cannot dispatch while the fee is only quoted', canDispatch('delivery', 'ready_for_dispatch', 'quoted'), false);
+eq('cannot dispatch after the customer declined', canDispatch('delivery', 'ready_for_dispatch', 'declined'), false);
+eq('CAN dispatch once accepted', canDispatch('delivery', 'ready_for_dispatch', 'accepted'), true);
+eq('cannot dispatch before the job is ready', canDispatch('delivery', 'printing_in_progress', 'accepted'), false);
+// Collection orders have no fee and never dispatch — the customer's own rider collects.
+eq('collection never dispatches', canDispatch('collection', 'ready_for_dispatch', 'accepted'), false);
+eq('collection has no fee to set', canSetDeliveryFee('collection', 'ready_for_dispatch'), false);
+
+eq('a printer can name the fee while printing', canSetDeliveryFee('delivery', 'printing_in_progress'), true);
+eq('a printer can still revise it when ready', canSetDeliveryFee('delivery', 'ready_for_dispatch'), true);
+eq('the fee is locked once it has shipped', canSetDeliveryFee('delivery', 'out_for_delivery'), false);
+eq('the fee is locked after delivery', canSetDeliveryFee('delivery', 'delivered'), false);
+
+// Every blocked state must explain itself — a printer staring at a disabled button is a support call.
+eq('accepted + ready has no blocking reason', dispatchBlockedReason('delivery', 'ready_for_dispatch', 'accepted'), null);
+eq('every other blocked state gives a reason',
+  (['not_set', 'quoted', 'declined'] as const)
+    .every((f) => typeof dispatchBlockedReason('delivery', 'ready_for_dispatch', f) === 'string'), true);
+
+console.log('\nCategory margin resolution');
+const productMargin = { marginType: 'fixed' as const, marginFixedKobo: N(25), marginPercentBps: 0 };
+const configured = { id_card: { marginType: 'fixed' as const, marginFixedKobo: N(200), marginPercentBps: 0 } };
+eq('a configured category wins over the product row',
+  marginFor(configured, 'id_card', productMargin).marginFixedKobo, N(200));
+eq('an unconfigured category falls back to the product row',
+  marginFor(configured, 'flyer', productMargin).marginFixedKobo, N(25));
+eq('an empty config changes nothing', marginFor({}, 'id_card', productMargin), productMargin);
+// Zero must be a real answer, not read as "not configured" — a category can be margin-free.
+const zeroed = { flyer: { marginType: 'fixed' as const, marginFixedKobo: 0, marginPercentBps: 0 } };
+eq('a zero margin is honoured, not treated as unset',
+  computeMargin(N(10000), 500, marginFor(zeroed, 'flyer', productMargin)), 0);
+// The editor's live preview must agree with the server, or the number shown is a lie.
+eq('7% preview matches the engine',
+  computeMargin(N(10000), 100, { marginType: 'percent', marginFixedKobo: 0, marginPercentBps: 700 }),
+  N(700));
+
+console.log('\nPer-category verification');
+const pairs = new Set(['shopA:sticker', 'shopA:flyer', 'shopB:flyer']);
+eq('a verified pair is visible', isVerified(pairs, 'shopA', 'sticker'), true);
+// The whole point of PER-category verification: clearance does not spread across categories.
+eq('verification does not leak between categories', isVerified(pairs, 'shopB', 'sticker'), false);
+eq('an unknown shop is never verified', isVerified(pairs, 'shopC', 'flyer'), false);
+eq('an empty set verifies nobody', isVerified(new Set(), 'shopA', 'sticker'), false);
+// Fail CLOSED: if the verification table is unreadable the resolver returns an empty set, so
+// shops disappear from the storefront rather than an unvetted printer being shown.
+eq('no verification data means no printers shown', isVerified(new Set(), 'shopA', 'flyer'), false);
+
+// Wrapped in an async IIFE: this file has no top-level await, and the summary must print
+// after these checks rather than before them.
+void (async () => {
+  console.log('\nEmail is inert until configured');
+  // The point of this batch: everything ships now, the DNS work happens whenever.
+  const hadKey = process.env.RESEND_API_KEY;
+  const hadFrom = process.env.EMAIL_FROM;
+  delete process.env.RESEND_API_KEY;
+  eq('unconfigured is reported honestly', emailConfigured(), false);
+  const skipped = await sendEmail({ to: 'a@b.com', subject: 's', heading: 'h', body: ['x'] });
+  eq('an unconfigured send is skipped, not thrown', skipped.sent, false);
+  eq('and says why', skipped.reason, 'not_configured');
+  // A missing address must never blow up a paid order either.
+  process.env.RESEND_API_KEY = 'test';
+  process.env.EMAIL_FROM = 'a@b.com';
+  const noAddress = await sendEmail({ to: '', subject: 's', heading: 'h', body: ['x'] });
+  eq('an empty address is skipped, not thrown', noAddress.sent, false);
+  eq('and says why', noAddress.reason, 'no_address');
+  delete process.env.RESEND_API_KEY;
+  delete process.env.EMAIL_FROM;
+  if (hadKey) process.env.RESEND_API_KEY = hadKey;
+  if (hadFrom) process.env.EMAIL_FROM = hadFrom;
+
+console.log('\nLegal documents');
+  eq('four documents make up the agreement', LEGAL_DOCS.length, 4);
+  eq('slugs are stable', LEGAL_DOCS.map((d) => d.slug), ['terms', 'privacy', 'refunds', 'acceptable-use']);
+  eq('an unknown slug resolves to nothing', getLegalDoc('nope'), undefined);
+  // Every document must actually load and parse — a missing file would 500 the page, and a
+  // terms page that 500s is worse than one that is merely out of date.
+  for (const d of LEGAL_DOCS) {
+    const blocks = parseLegal(readLegalDoc(d.file));
+    eq(`${d.slug} parses into blocks`, blocks.length > 20, true);
+    eq(`${d.slug} opens with its title`, blocks[0].type, 'h1');
+    eq(`${d.slug} has numbered sections`, blocks.some((b) => b.type === 'h2'), true);
+    eq(`${d.slug} has lists`, blocks.some((b) => b.type === 'ul'), true);
+  }
+  // Ordered lists must survive parsing — the Terms order-process steps are numbered.
+  const termsBlocks = parseLegal(readLegalDoc('terms.md'));
+  eq('terms keeps its numbered order process', termsBlocks.some((b) => b.type === 'ol'), true);
+  eq('bold segments are extracted', inlineSegments('a **b** c').filter((s) => s.bold).length, 1);
+  eq('plain text is left alone', inlineSegments('no markup').length, 1);
+  eq('a version is stamped for the consent record', LEGAL_VERSION.length > 0, true);
+  
+  console.log('\nFAQ seed content');
+  // The starter answers ship in migration 0009. They must describe the platform as BUILT —
+  // a FAQ that contradicts the product is worse than no FAQ.
+  const faqSql = readFileSync('drizzle/0009_v2_faq.sql', 'utf8');
+  eq('starter questions are seeded', (faqSql.match(/^\('/gm) ?? []).length, 8);
+  eq('delivery answer says cash to the rider', /cash to the rider/.test(faqSql), true);
+  eq('delivery answer says it is not charged at checkout', /not charged at checkout/.test(faqSql), true);
+  eq('Collection fallback is explained', /send your own rider/.test(faqSql), true);
+  eq('no rounding up is explained', /do not guess or round it up/.test(faqSql), true);
+  eq('CDR is listed among accepted files', /CDR/.test(faqSql), true);
+  // The eight live categories are never listed here on purpose — that list changes, and a
+  // stale product list in a FAQ is exactly the drift the admin editor exists to prevent.
+  
+    console.log(`\n${pass} passed, ${fail} failed\n`);
+  process.exit(fail === 0 ? 0 : 1);
+})();

@@ -6,6 +6,7 @@ import { RotateCcw, Trash2 } from 'lucide-react';
 import { LIVE_CATEGORIES, getCategory, getListing, gridCells, cellKey } from '@/lib/categories';
 import { Button } from '@/components/ui/Button';
 import { Field, Input, Select } from '@/components/ui/Field';
+import { PhotoUpload } from '@/components/ui/PhotoUpload';
 import { saveProduct, type ProductPayload } from './actions';
 
 /**
@@ -46,7 +47,7 @@ export function ProductForm({ initial }: { initial: InitialProduct }) {
   const [rate, setRate] = useState(initial.ratePerUnit);
   const [offersHylet, setOffersHylet] = useState(initial.offersHylet);
   const [turnaround, setTurnaround] = useState(initial.turnaroundHours || '24');
-  const [photoUrl, setPhotoUrl] = useState(initial.photoUrl);
+  const [photoUrl, setPhotoUrl] = useState<string | undefined>(initial.photoUrl || undefined);
   const [cellPrices, setCellPrices] = useState<Record<string, string>>(initial.cellPrices);
   const [removed, setRemoved] = useState<Set<string>>(new Set());
   const [addonPrices, setAddonPrices] = useState<Record<string, string>>(initial.addonPrices);
@@ -104,7 +105,7 @@ export function ProductForm({ initial }: { initial: InitialProduct }) {
       ratePerUnit: validMode === 'per_area' ? rate : '',
       offersHylet: perArea ? offersHylet : false,
       turnaroundHours: turnaround,
-      photoUrl: photoUrl.trim(),
+      photoUrl: photoUrl ?? '',
       cells: validMode === 'matrix' && grid
         ? cells
             .filter((c) => !removed.has(cellKey(grid, c)))
@@ -299,8 +300,9 @@ export function ProductForm({ initial }: { initial: InitialProduct }) {
         <Field label="Turnaround (hours)">
           <Input inputMode="numeric" value={turnaround} onChange={(e) => setTurnaround(e.target.value.replace(/\D/g, ''))} />
         </Field>
-        <Field label="Photo URL (optional)" hint="Real photos of your work build trust — icons are the fallback.">
-          <Input value={photoUrl} onChange={(e) => setPhotoUrl(e.target.value)} placeholder="https://…" />
+        {/* QA 1.7: was a plain URL text box. Printers upload a real photo of their own work now. */}
+        <Field label="Photo of your work (optional)" hint="Shown on your card when customers compare printers.">
+          <PhotoUpload kind="products" label="Product" url={photoUrl} onChange={setPhotoUrl} aspect="aspect-[3/2]" />
         </Field>
       </div>
 

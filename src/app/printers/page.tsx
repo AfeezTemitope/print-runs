@@ -5,6 +5,8 @@ import { MapPin, Star, Clock } from 'lucide-react';
 import { db, tables } from '@/db';
 import { getCategory } from '@/lib/categories';
 import { computePrice, productMatchesSpec, computeMargin, getPlatformFeeKobo } from '@/lib/pricing';
+import { getCategoryMargins, marginFor } from '@/lib/margins';
+import { getVerifiedPairs, isVerified } from '@/lib/verification';
 import { specFromParams } from '@/lib/spec';
 import { distanceKm, bbox, LAGOS } from '@/lib/geo';
 import { naira } from '@/lib/format';
@@ -71,12 +73,17 @@ export default async function PrintersPage({ searchParams }: { searchParams: Pro
 
   // The ₦500 platform service fee is shown at checkout, not folded into the card price —
   // but we surface it here as a note so the checkout total isn't a surprise.
+  const margins = await getCategoryMargins();
+  const verified = await getVerifiedPairs();
   const platformFeeKobo = await getPlatformFeeKobo((key) =>
     db().select().from(tables.platformSettings).where(eq(tables.platformSettings.key, key)).limit(1)
       .then((rows) => rows[0]),
   );
 
   const cards = shops.flatMap((shop) => {
+    // Locked decision: verification is per category. A shop may have prepared products in a
+    // category it has not been cleared for — those must never reach a customer.
+    if (!isVerified(verified, shop.id, spec.category)) return [];
     const candidates = prods.filter((p) => p.shopId === shop.id && productMatchesSpec(spec, p));
     if (!candidates.length) return [];
     // Best quotable price wins; otherwise the shop shows as Request Quote.
@@ -92,7 +99,7 @@ export default async function PrintersPage({ searchParams }: { searchParams: Pro
     for (const p of candidates) {
       const r = computePrice(spec, p, variants.filter((v) => v.productId === p.id), addons.filter((a) => a.productId === p.id));
       if (r.ok) {
-        const sellingKobo = r.totalKobo + computeMargin(r.totalKobo, spec.qty ?? 1, p);
+        const sellingKobo = r.totalKobo + computeMargin(r.totalKobo, spec.qty ?? 1, marginFor(margins, p.categorySlug, p));
         if (!best || sellingKobo < best.sellingKobo) {
           best = { productId: p.id, sellingKobo, turnaround: p.turnaroundHours };
         }

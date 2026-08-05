@@ -1,7 +1,9 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { LIVE_CATEGORIES, CATEGORIES } from '@/lib/categories';
+import { getCatalogPhotos, pickPhoto } from '@/lib/photos';
 import { Glyph } from '@/components/ui/Glyph';
+import { ProductImage } from '@/components/ui/ProductImage';
 import { CodeBadge } from '@/components/ui/CodeBadge';
 
 export const metadata: Metadata = {
@@ -9,7 +11,8 @@ export const metadata: Metadata = {
   description: 'Banners, jotters, flyers, business cards, stickers, branded nylon, thank you cards and ID cards — printed by Lagos printers near you.',
 };
 
-export default function ProductsPage() {
+export default async function ProductsPage() {
+  const photos = await getCatalogPhotos();
   // QA 1.1: ONE card per product. Categories with more than one type (Sticker, Jotter,
   // Business Card) no longer explode into a card each — the type choice happens on the
   // photo-led page behind the card, not here.
@@ -27,19 +30,28 @@ export default function ProductsPage() {
           <li key={c.slug}>
             <Link
               href={`/configure/${c.slug}`}
-              className="group flex h-full flex-col gap-3 rounded-2xl border border-black/12 bg-white p-5 transition-all hover:-translate-y-0.5 hover:border-blue"
+              className="group flex h-full flex-col overflow-hidden rounded-2xl border border-black/12 bg-white transition-all hover:-translate-y-0.5 hover:border-blue"
             >
-              <div className="flex items-start justify-between">
-                <Glyph kind={c.glyph} color={c.hue} className="size-12" />
-                <CodeBadge code={c.code} tone="light" />
+              <div className="relative">
+                <ProductImage
+                  url={pickPhoto(photos, c.slug)}
+                  glyph={c.glyph}
+                  hue={c.hue}
+                  alt={c.name}
+                  className="aspect-[4/3] bg-pale/40"
+                  glyphClassName="size-14"
+                />
+                <span className="absolute right-2.5 top-2.5"><CodeBadge code={c.code} tone="light" /></span>
               </div>
-              <div>
-                <h2 className="font-display text-lg font-extrabold tracking-tight text-navy">{c.name}</h2>
-                <p className="mt-0.5 text-[13px] text-black/55">{c.blurb}</p>
+              <div className="flex flex-1 flex-col gap-3 p-5">
+                <div>
+                  <h2 className="font-display text-lg font-extrabold tracking-tight text-navy">{c.name}</h2>
+                  <p className="mt-0.5 text-[13px] text-black/55">{c.blurb}</p>
+                </div>
+                <span className="mt-auto border-t border-dashed border-black/25 pt-2.5 font-display text-[13px] font-bold text-navy transition-colors group-hover:text-blue">
+                  {c.listings.length > 1 ? 'Choose type' : 'Configure'} <span aria-hidden>→</span>
+                </span>
               </div>
-              <span className="mt-auto border-t border-dashed border-black/25 pt-2.5 font-display text-[13px] font-bold text-navy transition-colors group-hover:text-blue">
-                {c.listings.length > 1 ? 'Choose type' : 'Configure'} <span aria-hidden>→</span>
-              </span>
             </Link>
           </li>
         ))}

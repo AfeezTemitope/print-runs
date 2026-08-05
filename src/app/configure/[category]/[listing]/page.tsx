@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { getCategory, getListing, liveListings } from '@/lib/categories';
+import { getCatalogPhotos, pickPhoto } from '@/lib/photos';
 import { Configurator } from '../Configurator';
 
 export function generateStaticParams() {
@@ -29,5 +30,6 @@ export default async function ConfigureListingPage(
   const l = getListing(cat, listing);
   if (!l) notFound();
 
-  return <Configurator category={cat} listing={l} />;
+  const photos = await getCatalogPhotos();
+  return <Configurator category={cat} listing={l} photoUrl={pickPhoto(photos, cat.slug, l.slug)} />;
 }

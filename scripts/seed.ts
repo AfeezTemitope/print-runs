@@ -100,6 +100,22 @@ async function main() {
       bio: 'Quality prints, honest turnaround.',
     }).returning();
 
+    // Verification is enforced on the storefront, so seeded printers must be verified or the
+    // demo site shows nothing. Shop 4 is left unverified for Sticker on purpose, so the
+    // "applied, awaiting review" state is visible in /admin/verification.
+    await db().insert(tables.shopCategoryVerifications).values(
+      liveListings()
+        .map(({ category }) => category.slug)
+        .filter((slug, idx, all) => all.indexOf(slug) === idx)
+        .map((categorySlug) => ({
+          shopId: shop.id,
+          categorySlug,
+          status: (i === 3 && categorySlug === 'sticker' ? 'pending' : 'verified') as 'pending' | 'verified',
+          workPermitUrl: i === 3 && categorySlug === 'sticker' ? 'https://res.cloudinary.com/demo/permit.pdf' : null,
+          reviewedAt: i === 3 && categorySlug === 'sticker' ? null : new Date(),
+        })),
+    );
+
     console.log(`Seeding products for ${p.name}…`);
 
     // Products are generated FROM the category config rather than hand-listed, so the seed can

@@ -54,6 +54,14 @@ export const settlementStatus = pgEnum('settlement_status', ['pending', 'settled
 // Refund tracking for the ops cancel/refund actions this batch adds.
 export const refundStatus = pgEnum('refund_status', ['none', 'requested', 'partial', 'full']);
 
+/**
+ * The delivery fee conversation, which happens OUTSIDE the system: the printer names a fee,
+ * a PrintRuns rep relays it to the customer by phone, and the customer pays the rider in cash
+ * on arrival. Nothing here moves money — it records where that conversation got to, so an
+ * order can never be dispatched to someone who has not agreed to pay on the doorstep.
+ */
+export const deliveryFeeStatus = pgEnum('delivery_fee_status', ['not_set', 'quoted', 'accepted', 'declined']);
+
 export const reassignmentResolution = pgEnum('reassignment_resolution', [
   'same_price',
   'price_increase',
@@ -140,6 +148,59 @@ export const shopCategoryVerifications = pgTable('shop_category_verifications', 
 export const platformSettings = pgTable('platform_settings', {
   key: text('key').primaryKey(),
   valueKobo: integer('value_kobo').notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/* ------------------------------------------------------------------ */
+/* FAQ (admin-managed)                                                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Customer-facing questions, editable from /admin/faq. The answers change as operations
+ * change — delivery, fees, turnaround — and none of that should need a deploy.
+ */
+export const faqEntries = pgTable('faq_entries', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  question: text('question').notNull(),
+  answer: text('answer').notNull(),
+  sortOrder: integer('sort_order').notNull().default(0),
+  isPublished: boolean('is_published').notNull().default(true),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  index('faq_published_idx').on(t.isPublished, t.sortOrder),
+]);
+
+/* ------------------------------------------------------------------ */
+/* Commercial margins (admin-managed, platform-wide)                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The margin is PrintRuns' own commercial layer, not the printer's — a printer never sees it
+ * and never sets it. It therefore belongs to the platform, per category, and must be editable
+ * without a deploy (decision 2's principle, applied to decisions 16 and 23).
+ *
+ * products.margin* stays as the per-row fallback for anything not configured here.
+ */
+export const categoryMargins = pgTable('category_margins', {
+  categorySlug: text('category_slug').primaryKey(),
+  marginType: marginType('margin_type').notNull().default('fixed'),
+  marginFixedKobo: integer('margin_fixed_kobo').notNull().default(0),
+  marginPercentBps: integer('margin_percent_bps').notNull().default(0),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/* ------------------------------------------------------------------ */
+/* Catalog photography (admin-managed, platform-wide)                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The photos on the Products grid and the type-selection page belong to the PLATFORM, not to
+ * any one printer — every shop's Round Cut sticker shows the same picture. Keyed by
+ * 'category' or 'category:listing' so one small table covers both levels.
+ */
+export const catalogPhotos = pgTable('catalog_photos', {
+  key: text('key').primaryKey(),
+  url: text('url').notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -246,7 +307,18 @@ export const orders = pgTable('orders', {
   sellingPriceKobo: integer('selling_price_kobo'),
   platformFeeKobo: integer('platform_fee_kobo'),
   amountPaidKobo: integer('amount_paid_kobo'),
-  deliveryFeeKobo: integer('delivery_fee_kobo'), // null until ops quotes it post-payment (B1)
+  deliveryFeeKobo: integer('delivery_fee_kobo'), // null until the printer names it post-payment (B1)
+  deliveryFeeStatus: deliveryFeeStatus('delivery_fee_status').notNull().default('not_set'),
+  deliveryFeeQuotedAt: timestamp('delivery_fee_quoted_at', { withTimezone: true }),
+  deliveryFeeRespondedAt: timestamp('delivery_fee_responded_at', { withTimezone: true }),
+  opsNote: text('ops_note'), // free-text log for the rep handling this order
+  /**
+   * Which version of the Terms, Privacy Policy, Refund Policy and Acceptable Use Policy the
+   * customer accepted at checkout. Recorded per order rather than per account, because the
+   * documents change over time and a dispute is always about one specific order.
+   */
+  legalVersionAccepted: text('legal_version_accepted'),
+  legalAcceptedAt: timestamp('legal_accepted_at', { withTimezone: true }),
 
   /* V2 fulfilment: never a customer checkout choice (decision 19, 28 Jul). */
   fulfillmentMethod: fulfillmentMethod('fulfillment_method').notNull().default('delivery'),

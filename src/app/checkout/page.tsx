@@ -4,6 +4,7 @@ import { eq } from 'drizzle-orm';
 import { db, tables } from '@/db';
 import { getCategory } from '@/lib/categories';
 import { computePrice, computeOrderTotals, getPlatformFeeKobo } from '@/lib/pricing';
+import { getCategoryMargins, marginFor } from '@/lib/margins';
 import { specFromParams } from '@/lib/spec';
 import { CheckoutClient } from './CheckoutClient';
 
@@ -42,11 +43,12 @@ export default async function CheckoutPage({ searchParams }: { searchParams: Pro
   let platformFeeKobo: number | null = null;
   let amountPaidKobo: number | null = null;
   if (price.ok) {
+    const margins = await getCategoryMargins();
     const feeKobo = await getPlatformFeeKobo((key) =>
       db().select().from(tables.platformSettings).where(eq(tables.platformSettings.key, key)).limit(1)
         .then((rows) => rows[0]),
     );
-    const totals = computeOrderTotals(price.totalKobo, spec.qty ?? 1, product, feeKobo);
+    const totals = computeOrderTotals(price.totalKobo, spec.qty ?? 1, marginFor(margins, product.categorySlug, product), feeKobo);
     sellingPriceKobo = totals.sellingPriceKobo;
     platformFeeKobo = totals.platformFeeKobo;
     amountPaidKobo = totals.amountPaidKobo;

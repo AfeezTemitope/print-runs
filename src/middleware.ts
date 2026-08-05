@@ -1,13 +1,15 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { jwtVerify } from 'jose';
 
+const ADMIN_AREA = /^\/admin(\/|$)/;
 const PRINTER_AREA = /^\/dashboard(\/|$)/;
 const CUSTOMER_AREA = /^\/(orders|track|checkout)(\/|$)/;
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
+  const needsAdmin = ADMIN_AREA.test(pathname);
   const needsPrinter = PRINTER_AREA.test(pathname);
-  const needsAuth = needsPrinter || CUSTOMER_AREA.test(pathname);
+  const needsAuth = needsAdmin || needsPrinter || CUSTOMER_AREA.test(pathname);
   if (!needsAuth) return NextResponse.next();
 
   const token = req.cookies.get('pr_session')?.value;
@@ -18,6 +20,10 @@ export async function middleware(req: NextRequest) {
   try {
     const { payload } = await jwtVerify(token, new TextEncoder().encode(process.env.AUTH_SECRET!));
     const role = payload.role as string;
+    // Admins can see the printer dashboard for support purposes; printers can never see admin.
+    if (needsAdmin && role !== 'admin') {
+      return NextResponse.redirect(new URL('/', req.url));
+    }
     if (needsPrinter && role !== 'printer' && role !== 'admin') {
       return NextResponse.redirect(new URL('/', req.url));
     }
@@ -28,5 +34,5 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/dashboard/:path*', '/orders/:path*', '/track', '/checkout/:path*'],
+  matcher: ['/admin/:path*', '/dashboard/:path*', '/orders/:path*', '/track', '/checkout/:path*'],
 };

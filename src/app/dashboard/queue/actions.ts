@@ -4,7 +4,9 @@ import { revalidatePath } from 'next/cache';
 import { and, eq } from 'drizzle-orm';
 import { db, tables } from '@/db';
 import { getMyShop } from '@/lib/auth';
-import { canDecline } from '@/lib/status';
+import { canDecline, canDispatch, canSetDeliveryFee, dispatchBlockedReason } from '@/lib/status';
+import { orderReady, orderOnTheWay } from '@/lib/email';
+import { naira } from '@/lib/format';
 
 /**
  * V2 queue actions. The V1 pair (markPrintingDone / completeJob) covered a 3-status
@@ -57,8 +59,8 @@ export async function markPrintingDone(orderId: string) {
  * handover. For a Collection order it is also the point the printer's settlement
  * entitlement begins (decision 20) — a slow-to-collect customer must not hold their money.
  *
- * The "your order is ready" email hangs off readyAt; the email provider itself is still
- * to be added, so for now this timestamp is what that job will read.
+ * Sends the "your order is ready" email on the transition — the readyAt timestamp is what
+ * that email hangs off, and it is only written once, so the mail cannot be sent twice.
  */
 export async function markReadyForDispatch(orderId: string) {
   const shop = await getMyShop();
@@ -71,8 +73,17 @@ export async function markReadyForDispatch(orderId: string) {
       eq(tables.orders.shopId, shop.id),
       eq(tables.orders.status, 'printing_completed'),
     ))
-    .returning({ id: tables.orders.id });
+    .returning();
   if (!res.length) return { error: 'Finish printing first — this job is not marked done.' };
+
+  const updated = res[0];
+  if (updated.contactEmail) {
+    await orderReady(updated.contactEmail, {
+      code: updated.code,
+      printer: shop.businessName,
+      collection: updated.fulfillmentMethod === 'collection',
+    });
+  }
 
   revalidatePath('/dashboard/queue');
   return { ok: true } as const;
@@ -86,14 +97,21 @@ export async function dispatchRider(orderId: string) {
   const [order] = await db().select().from(tables.orders)
     .where(and(eq(tables.orders.id, orderId), eq(tables.orders.shopId, shop.id))).limit(1);
   if (!order) return { error: 'Not your job.' };
-  if (order.fulfillmentMethod === 'collection') {
-    return { error: 'This order is being collected by the customer — use Confirm handover.' };
+  // The customer pays the rider in cash on arrival, so nothing leaves the shop until a rep
+  // has confirmed they accepted the fee. Otherwise the rider rides out on a maybe.
+  if (!canDispatch(order.fulfillmentMethod, order.status, order.deliveryFeeStatus)) {
+    return { error: dispatchBlockedReason(order.fulfillmentMethod, order.status, order.deliveryFeeStatus) ?? 'Not ready.' };
   }
-  if (order.status !== 'ready_for_dispatch') return { error: 'This job is not ready for dispatch yet.' };
 
   await db().update(tables.orders)
     .set({ status: 'out_for_delivery', updatedAt: new Date() })
     .where(eq(tables.orders.id, orderId));
+
+  // Reminds them of the exact cash amount to have ready, which is the whole risk in a
+  // cash-on-delivery handover: a rider arriving to someone with no money in the house.
+  if (order.contactEmail) {
+    await orderOnTheWay(order.contactEmail, { code: order.code, fee: naira(order.deliveryFeeKobo) });
+  }
 
   revalidatePath('/dashboard/queue');
   return { ok: true } as const;
@@ -175,5 +193,45 @@ export async function cantFulfil(orderId: string, reason: string) {
     .where(eq(tables.orders.id, order.id));
 
   revalidatePath('/dashboard/queue');
+  return { ok: true } as const;
+}
+
+/**
+ * The printer names their own delivery fee (the locked decision on fee source). It is NOT
+ * charged through PrintRuns — a rep relays the number by phone and the customer pays the
+ * rider in cash on arrival, so this only records the amount and flags it for that call.
+ *
+ * Re-quoting is allowed right up until dispatch, but it resets an already-accepted fee back
+ * to 'quoted': a customer who agreed to 2,000 has not agreed to 3,500.
+ */
+export async function setDeliveryFee(orderId: string, naira: string) {
+  const shop = await getMyShop();
+  if (!shop) return { error: 'Not your shop.' };
+
+  const kobo = Math.round(Number(naira || 0) * 100);
+  if (!Number.isFinite(kobo) || kobo <= 0) return { error: 'Enter the delivery fee in naira.' };
+  if (kobo > 50_000_00) return { error: 'That looks too high — enter the fee in naira, not kobo.' };
+
+  const [order] = await db().select().from(tables.orders)
+    .where(and(eq(tables.orders.id, orderId), eq(tables.orders.shopId, shop.id))).limit(1);
+  if (!order) return { error: 'Not your job.' };
+  if (!canSetDeliveryFee(order.fulfillmentMethod, order.status)) {
+    return {
+      error: order.fulfillmentMethod === 'collection'
+        ? 'This order is being collected — there is no delivery fee.'
+        : 'This order has already left the shop.',
+    };
+  }
+
+  await db().update(tables.orders).set({
+    deliveryFeeKobo: kobo,
+    deliveryFeeStatus: 'quoted',
+    deliveryFeeQuotedAt: new Date(),
+    deliveryFeeRespondedAt: null,
+    updatedAt: new Date(),
+  }).where(eq(tables.orders.id, orderId));
+
+  revalidatePath('/dashboard/queue');
+  revalidatePath('/admin/orders');
   return { ok: true } as const;
 }

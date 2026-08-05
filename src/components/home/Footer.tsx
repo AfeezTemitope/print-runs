@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { Logo } from '@/components/ui/Logo';
+import { LEGAL_DOCS } from '@/lib/legal';
 
 const COLS = [
   {
@@ -8,13 +9,15 @@ const COLS = [
       { label: 'Stickers', href: '/configure/sticker' },
       { label: 'Banners', href: '/configure/banner' },
       { label: 'Business Cards', href: '/configure/business_card' },
-      { label: 'Frames', href: '/configure/frame' },
+      // Frame is hidden from customers, so linking to it here produced a 404.
+      { label: 'Jotters', href: '/configure/jotter' },
     ],
   },
   {
     h: 'Service',
     links: [
       { label: 'Track Order', href: '/track' },
+      { label: 'FAQ', href: '/faq' },
       { label: 'All Products', href: '/products' },
       { label: 'My Orders', href: '/orders' },
       { label: 'Sell on Print Runs', href: '/register?as=printer' },
@@ -28,6 +31,10 @@ const COLS = [
       { label: 'Printer Dashboard', href: '/dashboard' },
     ],
   },
+  {
+    h: 'Legal',
+    links: LEGAL_DOCS.map((d) => ({ label: d.title, href: `/legal/${d.slug}` })),
+  },
 ];
 
 export function Footer() {
@@ -38,7 +45,7 @@ export function Footer() {
           <Logo size="lg" />
           <p className="max-w-xs text-white/65">Print without leaving home. Lagos-wide delivery and pickup.</p>
         </div>
-        <div className="grid grid-cols-2 gap-8 py-9 sm:grid-cols-3">
+        <div className="grid grid-cols-2 gap-8 py-9 sm:grid-cols-4">
           {COLS.map((c) => (
             <nav key={c.h} aria-label={c.h}>
               <h4 className="mb-3.5 font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-pale">{c.h}</h4>

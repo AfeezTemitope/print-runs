@@ -4,10 +4,13 @@ import { useState, useTransition } from 'react';
 import { Download, CheckCircle2, Bike, Lock, Printer, PackageCheck, HandCoins, Ban } from 'lucide-react';
 import { Button, ButtonLink } from '@/components/ui/Button';
 import type { OrderStatus, FulfillmentMethod } from '@/lib/status';
-import { canDecline } from '@/lib/status';
+import type { DeliveryFeeStatus } from '@/lib/status';
+import { canDecline, canDispatch, canSetDeliveryFee, dispatchBlockedReason } from '@/lib/status';
+import { naira } from '@/lib/format';
+import { Input } from '@/components/ui/Field';
 import {
   startPrinting, markPrintingDone, markReadyForDispatch,
-  dispatchRider, confirmHandover, cantFulfil,
+  dispatchRider, confirmHandover, cantFulfil, setDeliveryFee,
 } from './actions';
 
 /**
@@ -19,6 +22,7 @@ import {
  */
 export function QueueActions({
   orderId, status, method, fileUrl, collectorName, collectorPhone,
+  feeStatus, feeKobo,
 }: {
   orderId: string;
   status: OrderStatus;
@@ -26,11 +30,14 @@ export function QueueActions({
   fileUrl: string | null;
   collectorName: string | null;
   collectorPhone: string | null;
+  feeStatus: DeliveryFeeStatus;
+  feeKobo: number | null;
 }) {
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [declining, setDeclining] = useState(false);
   const [reason, setReason] = useState('');
+  const [fee, setFee] = useState(feeKobo ? String(feeKobo / 100) : '');
 
   const isCollection = method === 'collection';
 
@@ -80,7 +87,7 @@ export function QueueActions({
           </Button>
         )}
 
-        {ready && !isCollection && (
+        {ready && !isCollection && canDispatch(method, status, feeStatus) && (
           <Button size="sm" variant="secondary" onClick={() => run(dispatchRider)} disabled={pending}>
             <Bike className="size-4" /> Dispatch rider
           </Button>
@@ -142,6 +149,50 @@ export function QueueActions({
             </Button>
           </div>
         </div>
+      )}
+
+      {/* Delivery fee. The printer names it; a PrintRuns rep confirms it with the customer by
+          phone; the customer pays the rider in cash on arrival. Nothing is charged online. */}
+      {!isCollection && canSetDeliveryFee(method, status) && (
+        <div className="mt-2.5 rounded-xl border border-black/12 p-3">
+          <div className="flex flex-wrap items-end gap-2">
+            <div>
+              <span className="mb-1 block font-display text-[12px] font-bold text-navy">
+                Your delivery fee
+              </span>
+              <div className="relative">
+                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 font-mono text-sm text-black/40">₦</span>
+                <Input
+                  inputMode="numeric"
+                  value={fee}
+                  onChange={(e) => setFee(e.target.value.replace(/[^\d]/g, ''))}
+                  placeholder="2000"
+                  aria-label="Delivery fee in naira"
+                  className="!w-32 !pl-7"
+                />
+              </div>
+            </div>
+            <Button size="sm" variant="tertiary" disabled={pending || !fee}
+              onClick={() => { setError(null); start(async () => {
+                const res = await setDeliveryFee(orderId, fee);
+                if (res?.error) setError(res.error);
+              }); }}>
+              {feeStatus === 'not_set' ? 'Send to PrintRuns' : 'Update fee'}
+            </Button>
+          </div>
+          <p className="mt-1.5 text-xs text-black/55">
+            {feeStatus === 'not_set' && 'Your rider collects this in cash on arrival. PrintRuns confirms it with the customer before you dispatch.'}
+            {feeStatus === 'quoted' && `${naira(feeKobo)} sent — PrintRuns is confirming it with the customer.`}
+            {feeStatus === 'accepted' && `Customer agreed to ${naira(feeKobo)}. Collect it in cash on delivery.`}
+            {feeStatus === 'declined' && 'Customer declined — they are sending their own rider instead.'}
+          </p>
+        </div>
+      )}
+
+      {ready && !isCollection && !canDispatch(method, status, feeStatus) && (
+        <p className="mt-2 flex items-center gap-1.5 text-xs text-black/55">
+          <Lock className="size-3.5" /> {dispatchBlockedReason(method, status, feeStatus)}
+        </p>
       )}
 
       {error && <p className="mt-2 text-sm text-red">{error}</p>}

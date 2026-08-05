@@ -1,4 +1,8 @@
 import { eq } from 'drizzle-orm';
+import { naira } from '@/lib/format';
+import { orderConfirmed, newJobForPrinter } from '@/lib/email';
+import { specSummary } from '@/lib/spec';
+import { listingLabel } from '@/lib/categories';
 import { db, tables } from '@/db';
 import { paystackVerify } from '@/lib/paystack';
 import { computePrice } from '@/lib/pricing';
@@ -27,6 +31,7 @@ export type PendingOrderMetadata = {
   contactEmail: string;
   contactPhonePrimary: string;
   contactPhoneSecondary: string;
+  legalVersionAccepted?: string;
   designFileUrl: string | null;
   designFileName: string | null;
   printNote: string | null;
@@ -139,6 +144,10 @@ export async function settlePayment(reference: string): Promise<{ ok: true } | {
     contactEmail: meta.contactEmail,
     contactPhonePrimary: meta.contactPhonePrimary,
     contactPhoneSecondary: meta.contactPhoneSecondary,
+    // Frozen onto the order at the moment of payment, so a dispute months later can be
+    // answered with the exact document version the customer agreed to.
+    legalVersionAccepted: meta.legalVersionAccepted ?? null,
+    legalAcceptedAt: meta.legalVersionAccepted ? new Date() : null,
     status: 'order_received',
     paymentStatus: 'paid',
     settlementStatus: 'pending',
@@ -160,6 +169,27 @@ export async function settlePayment(reference: string): Promise<{ ok: true } | {
     paidAt: data.paid_at ? new Date(data.paid_at) : new Date(),
     raw: data as unknown as Record<string, unknown>,
   }).onConflictDoNothing();
+
+  // Only the call that actually inserted the order sends mail, so a retried webhook and a
+  // returning browser tab cannot both send a receipt. Awaited but never allowed to throw:
+  // the order is already recorded, and a failed email must not fail the payment.
+  if (order) {
+    const summary = specSummary(finalOrder.spec, listingLabel(finalOrder.spec.category, finalOrder.spec.listing)).join(' · ');
+    const [shop] = await db().select().from(tables.shops).where(eq(tables.shops.id, finalOrder.shopId)).limit(1);
+
+    if (finalOrder.contactEmail) {
+      await orderConfirmed(finalOrder.contactEmail, {
+        code: finalOrder.code,
+        total: naira(finalOrder.amountPaidKobo),
+        printer: shop?.businessName ?? 'your printer',
+      });
+    }
+
+    if (shop) {
+      const [owner] = await db().select().from(tables.users).where(eq(tables.users.id, shop.userId)).limit(1);
+      if (owner?.email) await newJobForPrinter(owner.email, { code: finalOrder.code, summary });
+    }
+  }
 
   return { ok: true };
 }

@@ -80,6 +80,8 @@ export default async function QueuePage() {
                   fileUrl={job.designFileUrl}
                   collectorName={job.collectionAuthorizedName}
                   collectorPhone={job.collectionAuthorizedPhone}
+                  feeStatus={job.deliveryFeeStatus}
+                  feeKobo={job.deliveryFeeKobo}
                 />
               </div>
             </li>

@@ -3,13 +3,14 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
-  LayoutDashboard, ListOrdered, Package, ReceiptText, Wallet, Star, Settings,
+  LayoutDashboard, ListOrdered, Package, ReceiptText, Wallet, Star, Settings, BadgeCheck,
 } from 'lucide-react';
 
 const LINKS = [
   { href: '/dashboard', label: 'Overview', icon: LayoutDashboard, exact: true },
   { href: '/dashboard/queue', label: 'Job queue', icon: ListOrdered },
   { href: '/dashboard/products', label: 'Products', icon: Package },
+  { href: '/dashboard/verification', label: 'Verification', icon: BadgeCheck },
   { href: '/dashboard/orders', label: 'Orders', icon: ReceiptText },
   { href: '/dashboard/earnings', label: 'Earnings', icon: Wallet },
   { href: '/dashboard/reviews', label: 'Reviews', icon: Star },
