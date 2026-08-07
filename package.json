@@ -16,7 +16,8 @@
     "seed": "tsx scripts/seed.ts",
     "db:reset": "tsx scripts/db-reset.ts",
     "make-admin": "tsx scripts/make-admin.ts",
-    "test:email": "tsx scripts/test-email.ts"
+    "test:email": "tsx scripts/test-email.ts",
+    "db:verify": "tsx scripts/db-verify.ts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.0.0",

@@ -7,7 +7,7 @@ import { createSession } from '@/lib/auth';
 import { slugify, vendorCode } from '@/lib/format';
 
 const schema = z.object({
-  role: z.enum(['customer', 'printer']), // designer registration is V2 (spec §8)
+  role: z.enum(['customer', 'printer', 'designer']),
   firstName: z.string().min(1).max(80),
   surname: z.string().min(1).max(80),
   email: z.string().email().toLowerCase(),
@@ -33,6 +33,9 @@ export async function POST(req: Request) {
   if (d.role === 'printer' && !d.businessName) {
     return NextResponse.json({ error: 'Business name is required for a printer account.' }, { status: 400 });
   }
+  // Designers name their studio inside /studio rather than at signup: the studio row carries
+  // a portfolio, prices and a verification state, and creating an empty one here would put a
+  // half-built profile into the review queue before the designer has touched it.
 
   const existing = await db().select({ id: tables.users.id }).from(tables.users).where(eq(tables.users.email, d.email)).limit(1);
   if (existing.length) {

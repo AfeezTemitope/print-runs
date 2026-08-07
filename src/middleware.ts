@@ -3,13 +3,15 @@ import { jwtVerify } from 'jose';
 
 const ADMIN_AREA = /^\/admin(\/|$)/;
 const PRINTER_AREA = /^\/dashboard(\/|$)/;
+const STUDIO_AREA = /^\/studio(\/|$)/;
 const CUSTOMER_AREA = /^\/(orders|track|checkout)(\/|$)/;
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
   const needsAdmin = ADMIN_AREA.test(pathname);
   const needsPrinter = PRINTER_AREA.test(pathname);
-  const needsAuth = needsAdmin || needsPrinter || CUSTOMER_AREA.test(pathname);
+  const needsDesigner = STUDIO_AREA.test(pathname);
+  const needsAuth = needsAdmin || needsPrinter || needsDesigner || CUSTOMER_AREA.test(pathname);
   if (!needsAuth) return NextResponse.next();
 
   const token = req.cookies.get('pr_session')?.value;
@@ -27,6 +29,9 @@ export async function middleware(req: NextRequest) {
     if (needsPrinter && role !== 'printer' && role !== 'admin') {
       return NextResponse.redirect(new URL('/', req.url));
     }
+    if (needsDesigner && role !== 'designer' && role !== 'admin') {
+      return NextResponse.redirect(new URL('/', req.url));
+    }
     return NextResponse.next();
   } catch {
     return NextResponse.redirect(login);
@@ -34,5 +39,5 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/admin/:path*', '/dashboard/:path*', '/orders/:path*', '/track', '/checkout/:path*'],
+  matcher: ['/admin/:path*', '/dashboard/:path*', '/studio/:path*', '/orders/:path*', '/track', '/checkout/:path*'],
 };

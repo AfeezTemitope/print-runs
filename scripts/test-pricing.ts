@@ -12,7 +12,7 @@ import {
   gridCellCount, gridCells, cellKey, matchQtyRange, productCode,
 } from '../src/lib/categories';
 import type { PricingGrid } from '../src/lib/categories';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { photoKey, pickPhoto } from '../src/lib/photos';
 import { marginFor } from '../src/lib/margins';
 import { isVerified } from '../src/lib/verification';
@@ -468,6 +468,29 @@ console.log('\nLegal documents');
   eq('CDR is listed among accepted files', /CDR/.test(faqSql), true);
   // The eight live categories are never listed here on purpose — that list changes, and a
   // stale product list in a FAQ is exactly the drift the admin editor exists to prevent.
+  
+  console.log('\nMigrations execute, not just parse');
+  // Migration 0007 shipped SQL that type-checked, read correctly, and was rejected by Postgres.
+  // These guard the specific trap: an enum literal inside INSERT ... SELECT needs a cast,
+  // because Postgres only infers enum types through a VALUES list.
+  const migrations = readdirSync('drizzle').filter((f) => f.endsWith('.sql')).sort();
+  eq('every migration has a snapshot', migrations.every((f) => {
+    const idx = f.slice(0, 4);
+    return existsSync(`drizzle/meta/${idx}_snapshot.json`);
+  }), true);
+  const journal = JSON.parse(readFileSync('drizzle/meta/_journal.json', 'utf8')) as { entries: { tag: string }[] };
+  eq('journal matches the migration files', journal.entries.length, migrations.length);
+  eq('journal tags line up in order',
+    journal.entries.map((e) => `${e.tag}.sql`), migrations);
+  // An enum literal selected (not VALUES'd) into an enum column must carry an explicit cast.
+  for (const f of migrations) {
+    // Comments are stripped first — 0007 explains this very trap in a comment, and the
+    // check would otherwise flag its own documentation.
+    const sqlText = readFileSync(`drizzle/${f}`, 'utf8')
+      .split('\n').filter((l) => !l.trim().startsWith('--')).join('\n');
+    const risky = /INSERT[\s\S]*?SELECT[\s\S]*?'(verified|pending|rejected|fixed|percent)'(?!::)/i.test(sqlText);
+    eq(`${f} casts enum literals in INSERT ... SELECT`, risky, false);
+  }
   
     console.log(`\n${pass} passed, ${fail} failed\n`);
   process.exit(fail === 0 ? 0 : 1);

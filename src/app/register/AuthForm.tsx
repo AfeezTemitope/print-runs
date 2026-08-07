@@ -13,7 +13,10 @@ type Tab = 'customer' | 'printer' | 'designer';
 export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
   const router = useRouter();
   const params = useSearchParams();
-  const [tab, setTab] = useState<Tab>(params.get('as') === 'printer' ? 'printer' : 'customer');
+  const asParam = params.get('as');
+  const [tab, setTab] = useState<Tab>(
+    asParam === 'printer' ? 'printer' : asParam === 'designer' ? 'designer' : 'customer',
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
@@ -61,7 +64,12 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
     if (!res.ok) { setError(json.error ?? 'Something went wrong.'); return; }
 
     const next = params.get('next');
-    router.push(next ?? (json.role === 'printer' ? '/dashboard' : '/products'));
+    // Each role lands where it has something to do: printers in their queue, designers in
+    // the studio they still have to build, everyone else in the catalogue.
+    const home = json.role === 'printer' ? '/dashboard'
+      : json.role === 'designer' ? '/studio'
+      : '/products';
+    router.push(next ?? home);
     router.refresh();
   }
 
@@ -85,14 +93,12 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
               key={t}
               role="tab"
               aria-selected={tab === t}
-              disabled={t === 'designer'}
               onClick={() => setTab(t)}
               className={`flex-1 rounded-pill px-3 py-2 font-display text-[13px] font-bold capitalize transition-colors ${
                 tab === t ? 'bg-navy text-white' : 'text-navy disabled:opacity-35'
               }`}
             >
               {t === 'customer' ? 'Individual' : t}
-              {t === 'designer' && <span className="ml-1 font-mono text-[9px] uppercase opacity-70">soon</span>}
             </button>
           ))}
         </div>

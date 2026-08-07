@@ -152,6 +152,75 @@ export const platformSettings = pgTable('platform_settings', {
 });
 
 /* ------------------------------------------------------------------ */
+/* Designers (Batch 4)                                                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A designer's public storefront. Deliberately shaped like `shops`: designers set their own
+ * prices and customers pick them from a portfolio, exactly as with printers — so the same
+ * verification, settlement and rating machinery applies rather than a parallel set of rules.
+ *
+ * No location fields. Design is delivered as a file, so proximity is irrelevant and the
+ * distance sorting that governs printer choice has no meaning here.
+ */
+export const designerStudios = pgTable('designer_studios', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  code: text('code').notNull(),
+  displayName: text('display_name').notNull(),
+  slug: text('slug').notNull(),
+  tagline: text('tagline'),
+  bio: text('bio'),
+  avatarUrl: text('avatar_url'),
+  bannerUrl: text('banner_url'),
+  // The portfolio IS the application — there is no work permit to check for design.
+  verification: verificationStatus('verification').notNull().default('pending'),
+  verificationNote: text('verification_note'),
+  reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+  ratingAvg: doublePrecision('rating_avg').notNull().default(0),
+  ratingCount: integer('rating_count').notNull().default(0),
+  isActive: boolean('is_active').notNull().default(true),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex('designer_user_uq').on(t.userId),
+  uniqueIndex('designer_slug_uq').on(t.slug),
+  uniqueIndex('designer_code_uq').on(t.code),
+  index('designer_verified_idx').on(t.verification, t.isActive),
+]);
+
+/** Portfolio images. What a customer actually judges a designer on. */
+export const designerWorks = pgTable('designer_works', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  studioId: uuid('studio_id').notNull().references(() => designerStudios.id, { onDelete: 'cascade' }),
+  imageUrl: text('image_url').notNull(),
+  caption: text('caption'),
+  sortOrder: integer('sort_order').notNull().default(0),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  index('designer_works_studio_idx').on(t.studioId, t.sortOrder),
+]);
+
+/**
+ * What a designer sells. Revisions are priced explicitly because T&C section 10 promises a
+ * set number included and charges for the rest — a number the customer must see up front,
+ * not discover mid-job.
+ */
+export const designerServices = pgTable('designer_services', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  studioId: uuid('studio_id').notNull().references(() => designerStudios.id, { onDelete: 'cascade' }),
+  title: text('title').notNull(),
+  description: text('description'),
+  priceKobo: integer('price_kobo').notNull(),
+  revisionsIncluded: integer('revisions_included').notNull().default(2),
+  extraRevisionKobo: integer('extra_revision_kobo').notNull().default(0),
+  turnaroundHours: integer('turnaround_hours').notNull().default(48),
+  isActive: boolean('is_active').notNull().default(true),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  index('designer_services_studio_idx').on(t.studioId, t.isActive),
+]);
+
+/* ------------------------------------------------------------------ */
 /* FAQ (admin-managed)                                                 */
 /* ------------------------------------------------------------------ */
 

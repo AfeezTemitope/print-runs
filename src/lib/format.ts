@@ -20,6 +20,12 @@ export function vendorCode(): string {
   return `LB-${String(n).padStart(3, '0')}`;
 }
 
+/** Designer studios get their own prefix so a code alone tells you which side it belongs to. */
+export function studioCode(): string {
+  const n = Math.floor(10 + Math.random() * 989);
+  return `DS-${String(n).padStart(3, '0')}`;
+}
+
 export function slugify(s: string): string {
   return s.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
 }
