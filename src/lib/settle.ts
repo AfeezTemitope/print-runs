@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { naira } from '@/lib/format';
-import { orderConfirmed, newJobForPrinter } from '@/lib/email';
+import { orderConfirmed, newJobForPrinter, designOrderConfirmed, newDesignBrief } from '@/lib/email';
 import { specSummary } from '@/lib/spec';
 import { listingLabel } from '@/lib/categories';
 import { db, tables } from '@/db';
@@ -67,7 +67,19 @@ function isPendingOrderMetadata(m: unknown): m is PendingOrderMetadata {
  * - The unique constraint on orders.code makes a genuine race between the webhook and the
  *   callback page harmless: whichever insert loses is treated as an idempotent no-op.
  */
+/**
+ * Design purchases ride the same Paystack path as print, so the reference prefix decides which
+ * settler runs. PRD- is a design order, PRR- a paid extra revision; anything else is print.
+ * Branching on the reference rather than on metadata means a malformed or missing metadata
+ * blob can never cause a design payment to be settled as a print order.
+ */
 export async function settlePayment(reference: string): Promise<{ ok: true } | { ok: false; message: string }> {
+  if (reference.startsWith('PRD-')) return settleDesignOrder(reference);
+  if (reference.startsWith('PRR-')) return settleRevisionCharge(reference);
+  return settlePrintOrder(reference);
+}
+
+async function settlePrintOrder(reference: string): Promise<{ ok: true } | { ok: false; message: string }> {
   const [existing] = await db().select().from(tables.orders).where(eq(tables.orders.code, reference)).limit(1);
   if (existing && existing.paymentStatus === 'paid') return { ok: true }; // already settled
 
@@ -190,6 +202,143 @@ export async function settlePayment(reference: string): Promise<{ ok: true } | {
       if (owner?.email) await newJobForPrinter(owner.email, { code: finalOrder.code, summary });
     }
   }
+
+  return { ok: true };
+}
+
+/* ------------------------------------------------------------------ */
+/* Design settlement                                                   */
+/* ------------------------------------------------------------------ */
+
+export type PendingDesignMetadata = {
+  kind: 'design';
+  customerId: string;
+  studioId: string;
+  serviceId: string;
+  serviceTitle: string;
+  reviewMode: 'review' | 'direct';
+  brief: string;
+  briefFileUrl: string | null;
+  contactEmail: string;
+  contactPhone: string;
+  designerBaseKobo: number;
+  marginKobo: number;
+  platformFeeKobo: number;
+  amountPaidKobo: number;
+  revisionsIncluded: number;
+  extraRevisionKobo: number;
+  legalVersionAccepted?: string;
+};
+
+function isPendingDesignMetadata(m: unknown): m is PendingDesignMetadata {
+  if (!m || typeof m !== 'object') return false;
+  const r = m as Record<string, unknown>;
+  return r.kind === 'design'
+    && typeof r.customerId === 'string'
+    && typeof r.studioId === 'string'
+    && typeof r.serviceTitle === 'string'
+    && typeof r.brief === 'string'
+    && typeof r.designerBaseKobo === 'number'
+    && typeof r.amountPaidKobo === 'number';
+}
+
+/**
+ * Same contract as the print settler: the order row is created HERE, on first successful
+ * verification, never at checkout. An abandoned payment leaves no stray row, and the unique
+ * constraint on code makes the webhook/callback race a harmless no-op.
+ */
+async function settleDesignOrder(reference: string): Promise<{ ok: true } | { ok: false; message: string }> {
+  const [existing] = await db().select().from(tables.designOrders)
+    .where(eq(tables.designOrders.code, reference)).limit(1);
+  if (existing?.paymentStatus === 'paid') return { ok: true };
+
+  let data;
+  try {
+    data = await paystackVerify(reference);
+  } catch {
+    return { ok: false, message: 'Could not reach Paystack. Try again in a moment.' };
+  }
+  if (data.status !== 'success') return { ok: false, message: 'Payment was not completed.' };
+
+  const meta = data.metadata;
+  if (!isPendingDesignMetadata(meta)) return { ok: false, message: 'This payment is missing its order details.' };
+
+  // Recompute from the designer's own live price rather than trusting the metadata figures.
+  const [service] = await db().select().from(tables.designerServices)
+    .where(eq(tables.designerServices.id, meta.serviceId)).limit(1);
+  const baseKobo = service?.priceKobo ?? meta.designerBaseKobo;
+  const expected = baseKobo + meta.marginKobo + meta.platformFeeKobo;
+  if (data.amount !== expected) {
+    return { ok: false, message: 'Amount mismatch — contact support with your reference.' };
+  }
+
+  const [created] = await db().insert(tables.designOrders).values({
+    code: reference,
+    customerId: meta.customerId,
+    studioId: meta.studioId,
+    serviceId: meta.serviceId || null,
+    serviceTitle: meta.serviceTitle,
+    reviewMode: meta.reviewMode,
+    status: 'brief_received',
+    brief: meta.brief,
+    briefFileUrl: meta.briefFileUrl,
+    contactEmail: meta.contactEmail,
+    contactPhone: meta.contactPhone,
+    designerBaseKobo: baseKobo,
+    marginKobo: meta.marginKobo,
+    platformFeeKobo: meta.platformFeeKobo,
+    amountPaidKobo: expected,
+    revisionsIncluded: meta.revisionsIncluded,
+    extraRevisionKobo: meta.extraRevisionKobo,
+    paymentStatus: 'paid',
+    legalVersionAccepted: meta.legalVersionAccepted ?? null,
+  }).onConflictDoNothing().returning();
+
+  if (created) {
+    const [studio] = await db().select().from(tables.designerStudios)
+      .where(eq(tables.designerStudios.id, meta.studioId)).limit(1);
+    if (meta.contactEmail) {
+      await designOrderConfirmed(meta.contactEmail, {
+        code: reference,
+        total: naira(expected),
+        studio: studio?.displayName ?? 'your designer',
+        reviewMode: meta.reviewMode,
+      });
+    }
+    if (studio) {
+      const [owner] = await db().select().from(tables.users)
+        .where(eq(tables.users.id, studio.userId)).limit(1);
+      if (owner?.email) await newDesignBrief(owner.email, { code: reference, service: meta.serviceTitle });
+    }
+  }
+
+  return { ok: true };
+}
+
+/**
+ * A paid extra revision. The charge row is created at checkout (unlike orders) because it
+ * hangs off an order that already exists — there is nothing to duplicate, only to mark paid.
+ */
+async function settleRevisionCharge(reference: string): Promise<{ ok: true } | { ok: false; message: string }> {
+  const [charge] = await db().select().from(tables.designRevisionCharges)
+    .where(eq(tables.designRevisionCharges.reference, reference)).limit(1);
+  if (!charge) return { ok: false, message: 'That revision charge no longer exists.' };
+  if (charge.paymentStatus === 'paid') return { ok: true };
+
+  let data;
+  try {
+    data = await paystackVerify(reference);
+  } catch {
+    return { ok: false, message: 'Could not reach Paystack. Try again in a moment.' };
+  }
+  if (data.status !== 'success') return { ok: false, message: 'Payment was not completed.' };
+  if (data.amount !== charge.amountKobo) {
+    return { ok: false, message: 'Amount mismatch — contact support with your reference.' };
+  }
+
+  await db().update(tables.designRevisionCharges)
+    .set({ paymentStatus: 'paid' })
+    .where(eq(tables.designRevisionCharges.id, charge.id));
 
   return { ok: true };
 }

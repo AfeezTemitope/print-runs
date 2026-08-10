@@ -18,6 +18,8 @@ const COLS = [
     links: [
       { label: 'Track Order', href: '/track' },
       { label: 'FAQ', href: '/faq' },
+      { label: 'Designers', href: '/designers' },
+      { label: 'Hire a Designer', href: '/designers' },
       { label: 'All Products', href: '/products' },
       { label: 'My Orders', href: '/orders' },
       { label: 'Sell on Print Runs', href: '/register?as=printer' },
@@ -29,6 +31,7 @@ const COLS = [
       { label: 'Login', href: '/login' },
       { label: 'Register', href: '/register' },
       { label: 'Printer Dashboard', href: '/dashboard' },
+      { label: 'Designer Studio', href: '/studio' },
     ],
   },
   {

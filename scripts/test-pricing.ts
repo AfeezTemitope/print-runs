@@ -16,6 +16,11 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { photoKey, pickPhoto } from '../src/lib/photos';
 import { marginFor } from '../src/lib/margins';
 import { isVerified } from '../src/lib/verification';
+import {
+  DESIGN_MARGIN_KOBO, computeDesignTotals, freeRevisionsLeft,
+  canRequestRevision, needsPaidRevision, canApprove,
+} from '../src/lib/design-orders';
+import { designOrderCode, revisionChargeCode } from '../src/lib/format';
 import { emailConfigured, sendEmail } from '../src/lib/email';
 import { LEGAL_DOCS, LEGAL_VERSION, getLegalDoc, readLegalDoc, parseLegal, inlineSegments } from '../src/lib/legal';
 
@@ -491,6 +496,47 @@ console.log('\nLegal documents');
     const risky = /INSERT[\s\S]*?SELECT[\s\S]*?'(verified|pending|rejected|fixed|percent)'(?!::)/i.test(sqlText);
     eq(`${f} casts enum literals in INSERT ... SELECT`, risky, false);
   }
+  
+  console.log('\nDesign order pricing');
+  // Founder decision: a FLAT 1,000 naira per design order, not a share of the designer's fee.
+  eq('margin is a flat 1,000 naira', DESIGN_MARGIN_KOBO, N(1000));
+  const cheap = computeDesignTotals(N(8000), N(500));
+  const dear = computeDesignTotals(N(80000), N(500));
+  eq('a small job pays the same margin', cheap.marginKobo, N(1000));
+  eq('a large job pays the same margin', dear.marginKobo, N(1000));
+  eq('total is designer + margin + fee', cheap.amountPaidKobo, N(9500));
+  eq('the designer keeps their whole price', dear.designerBaseKobo, N(80000));
+  
+  console.log('\nRevision rules');
+  const twoIncluded = { status: 'proof_ready', reviewMode: 'review', revisionsIncluded: 2, revisionsUsed: 0 };
+  eq('free revisions start at the included count', freeRevisionsLeft(twoIncluded), 2);
+  eq('a free revision can be requested', canRequestRevision(twoIncluded, 0), true);
+  eq('no payment needed while free ones remain', needsPaidRevision(twoIncluded, 0), false);
+  
+  const spent = { ...twoIncluded, revisionsUsed: 2 };
+  eq('free revisions run out', freeRevisionsLeft(spent), 0);
+  eq('cannot request once free ones are gone', canRequestRevision(spent, 0), false);
+  eq('payment is required at that point', needsPaidRevision(spent, 0), true);
+  // A paid extra unlocks exactly one more request and never touches the included counter.
+  eq('a paid extra unlocks a request', canRequestRevision(spent, 1), true);
+  eq('and no further payment is asked for', needsPaidRevision(spent, 1), false);
+  // Revisions are only possible while a proof is actually on the table.
+  eq('cannot revise while the designer is still working',
+    canRequestRevision({ ...twoIncluded, status: 'in_progress' }, 0), false);
+  
+  console.log('\nProof approval gate');
+  eq('a waiting proof can be approved', canApprove({ status: 'proof_ready', reviewMode: 'review' }), true);
+  eq('nothing to approve mid-work', canApprove({ status: 'in_progress', reviewMode: 'review' }), false);
+  // Direct-to-print has no proof gate at all — that is what the customer chose.
+  eq('direct to print never asks for approval',
+    canApprove({ status: 'proof_ready', reviewMode: 'direct' }), false);
+  
+  console.log('\nSettlement routing by reference');
+  // settlePayment branches on the prefix, so a design payment can never be settled as print.
+  eq('design references are prefixed', designOrderCode().startsWith('PRD-'), true);
+  eq('revision charges are prefixed', revisionChargeCode().startsWith('PRR-'), true);
+  eq('the two prefixes never collide', designOrderCode().slice(0, 4) === revisionChargeCode().slice(0, 4), false);
+  
   
     console.log(`\n${pass} passed, ${fail} failed\n`);
   process.exit(fail === 0 ? 0 : 1);

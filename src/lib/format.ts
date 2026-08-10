@@ -20,6 +20,21 @@ export function vendorCode(): string {
   return `LB-${String(n).padStart(3, '0')}`;
 }
 
+/**
+ * Design orders carry their own prefix. The code doubles as the Paystack reference, so
+ * a glance at a transaction tells you whether it was a print job or a design job.
+ */
+export function designOrderCode(): string {
+  const n = Math.floor(100000 + Math.random() * 899999);
+  return `PRD-${n}`;
+}
+
+/** A paid extra revision is its own transaction, so it needs its own reference. */
+export function revisionChargeCode(): string {
+  const n = Math.floor(100000 + Math.random() * 899999);
+  return `PRR-${n}`;
+}
+
 /** Designer studios get their own prefix so a code alone tells you which side it belongs to. */
 export function studioCode(): string {
   const n = Math.floor(10 + Math.random() * 989);

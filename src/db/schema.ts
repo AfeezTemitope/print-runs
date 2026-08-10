@@ -220,6 +220,100 @@ export const designerServices = pgTable('designer_services', {
   index('designer_services_studio_idx').on(t.studioId, t.isActive),
 ]);
 
+/**
+ * A design job's lifecycle. Two shapes share it, because Refund section 10 gives the customer
+ * the choice up front:
+ *   review  — brief_received -> in_progress -> proof_ready -> (revision_requested ->
+ *             in_progress -> proof_ready)* -> approved
+ *   direct  — brief_received -> in_progress -> approved   (no proof gate at all)
+ */
+export const designStatus = pgEnum('design_status', [
+  'brief_received', 'in_progress', 'proof_ready', 'revision_requested', 'approved', 'cancelled',
+]);
+
+/** Refund section 10: Option A reviews before printing, Option B goes straight to print. */
+export const designReviewMode = pgEnum('design_review_mode', ['review', 'direct']);
+
+export const designOrders = pgTable('design_orders', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  code: text('code').notNull(),
+  customerId: uuid('customer_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+  studioId: uuid('studio_id').notNull().references(() => designerStudios.id, { onDelete: 'restrict' }),
+  serviceId: uuid('service_id').references(() => designerServices.id, { onDelete: 'set null' }),
+
+  serviceTitle: text('service_title').notNull(), // frozen: the service may be edited later
+  reviewMode: designReviewMode('review_mode').notNull().default('review'),
+  status: designStatus('status').notNull().default('brief_received'),
+
+  brief: text('brief').notNull(),
+  briefFileUrl: text('brief_file_url'),
+  contactEmail: text('contact_email').notNull(),
+  contactPhone: text('contact_phone').notNull(),
+
+  // Money, all in kobo. The margin is a flat platform amount, not a share of the designer's fee.
+  designerBaseKobo: integer('designer_base_kobo').notNull(),
+  marginKobo: integer('margin_kobo').notNull(),
+  platformFeeKobo: integer('platform_fee_kobo').notNull(),
+  amountPaidKobo: integer('amount_paid_kobo').notNull(),
+
+  // Snapshot at purchase: editing the service later must not change what was already sold.
+  revisionsIncluded: integer('revisions_included').notNull().default(0),
+  revisionsUsed: integer('revisions_used').notNull().default(0),
+  extraRevisionKobo: integer('extra_revision_kobo').notNull().default(0),
+
+  paymentStatus: paymentStatus('payment_status').notNull().default('unpaid'),
+  settlementStatus: settlementStatus('settlement_status').notNull().default('pending'),
+  refundStatus: refundStatus('refund_status').notNull().default('none'),
+  refundAmountKobo: integer('refund_amount_kobo'),
+  refundReason: text('refund_reason'),
+
+  finalFileUrl: text('final_file_url'),
+  approvedAt: timestamp('approved_at', { withTimezone: true }),
+  legalVersionAccepted: text('legal_version_accepted'),
+  opsNote: text('ops_note'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex('design_orders_code_uq').on(t.code),
+  index('design_orders_studio_idx').on(t.studioId, t.status),
+  index('design_orders_customer_idx').on(t.customerId),
+]);
+
+/** Every proof the designer has sent, kept as a numbered history rather than overwritten. */
+export const designProofs = pgTable('design_proofs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  designOrderId: uuid('design_order_id').notNull().references(() => designOrders.id, { onDelete: 'cascade' }),
+  round: integer('round').notNull(),
+  fileUrl: text('file_url').notNull(),
+  note: text('note'),
+  /**
+   * Approving a proof is what shifts liability to the customer under Terms section 9, so it
+   * is recorded against the exact proof they saw — not just as a flag on the order.
+   */
+  approvedAt: timestamp('approved_at', { withTimezone: true }),
+  revisionNote: text('revision_note'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex('design_proof_round_uq').on(t.designOrderId, t.round),
+]);
+
+/**
+ * A paid revision beyond the included allowance. Charged as its own Paystack transaction, so
+ * the customer authorises each extra explicitly rather than finding a larger bill later.
+ */
+export const designRevisionCharges = pgTable('design_revision_charges', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  designOrderId: uuid('design_order_id').notNull().references(() => designOrders.id, { onDelete: 'cascade' }),
+  reference: text('reference').notNull(),
+  amountKobo: integer('amount_kobo').notNull(),
+  paymentStatus: paymentStatus('payment_status').notNull().default('unpaid'),
+  consumedAt: timestamp('consumed_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex('design_revision_ref_uq').on(t.reference),
+  index('design_revision_order_idx').on(t.designOrderId, t.paymentStatus),
+]);
+
 /* ------------------------------------------------------------------ */
 /* FAQ (admin-managed)                                                 */
 /* ------------------------------------------------------------------ */

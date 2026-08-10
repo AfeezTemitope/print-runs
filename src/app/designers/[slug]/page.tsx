@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import Image from 'next/image';
 import { getPublicStudio, studioWorks, studioServices } from '@/lib/designers';
 import { naira } from '@/lib/format';
+import Link from 'next/link';
 import { CodeBadge } from '@/components/ui/CodeBadge';
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
@@ -78,15 +79,17 @@ export default async function StudioProfile({ params }: { params: Promise<{ slug
                 <dt>Turnaround</dt><dd className="font-bold text-navy">{s.turnaroundHours}h</dd>
               </div>
             </dl>
+            <Link href={`/design/book?service=${s.id}`}
+              className="mt-3 block rounded-pill bg-blue px-4 py-2.5 text-center font-display text-[13px] font-bold text-white hover:bg-navy">
+              Book this service <span aria-hidden>→</span>
+            </Link>
           </li>
         ))}
       </ul>
 
-      {/* Booking arrives with the design-order flow. Saying so is better than a dead button. */}
       <p className="mt-6 rounded-xl border border-dashed border-black/25 bg-pale/25 px-4 py-3 text-[13px] text-black/60">
-        Booking opens shortly. In the meantime, email{' '}
-        <a href="mailto:support@printruns.ng" className="font-semibold text-blue underline">support@printruns.ng</a>
-        {' '}quoting {studio.code} and we&apos;ll connect you.
+        Your payment is held by PrintRuns until the design is finished, and you choose whether to
+        review it before it goes to print.
       </p>
     </div>
   );

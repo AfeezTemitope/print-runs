@@ -78,7 +78,7 @@ export async function sendEmail(args: SendArgs): Promise<{ sent: boolean; reason
   }
 }
 
-const site = () => process.env.NEXT_PUBLIC_SITE_URL ?? 'https://printruns.ng';
+const site = () => process.env.NEXT_PUBLIC_APP_URL ?? 'https://printruns.ng';
 
 /* ------------------------------------------------------------------ */
 /* The four emails                                                     */
@@ -136,5 +136,73 @@ export function newJobForPrinter(to: string, o: { code: string; summary: string 
       `Order <strong>${o.code}</strong> is waiting in your queue. Accept it or mark it as one you can't fulfil, so we can reassign it quickly if needed.`,
     ],
     cta: { label: 'Open your queue', url: `${site()}/dashboard/queue` },
+  });
+}
+
+export function designOrderConfirmed(
+  to: string,
+  o: { code: string; total: string; studio: string; reviewMode: 'review' | 'direct' },
+) {
+  return sendEmail({
+    to,
+    subject: `Design order ${o.code} confirmed`,
+    heading: 'Your designer is starting work',
+    body: [
+      `We've received your payment of <strong>${o.total}</strong> and sent your brief to <strong>${o.studio}</strong>.`,
+      o.reviewMode === 'review'
+        ? `You'll get an email when your first proof is ready. Nothing goes to print until you approve it.`
+        : `You chose direct to print, so your design goes straight to production once it's finished — there's no proof step.`,
+      `Your reference is <strong>${o.code}</strong>.`,
+    ],
+    cta: { label: 'View your design order', url: `${site()}/orders/design/${o.code}` },
+  });
+}
+
+export function newDesignBrief(to: string, o: { code: string; service: string }) {
+  return sendEmail({
+    to,
+    subject: `New brief — ${o.code}`,
+    heading: 'You have a new design brief',
+    body: [
+      `A customer has paid for <strong>${o.service}</strong>.`,
+      `Brief <strong>${o.code}</strong> is waiting in your studio.`,
+    ],
+    cta: { label: 'Open your studio', url: `${site()}/studio/jobs` },
+  });
+}
+
+export function proofReady(to: string, o: { code: string; round: number; studio: string }) {
+  return sendEmail({
+    to,
+    subject: `Proof ${o.round} ready — ${o.code}`,
+    heading: 'Your proof is ready to review',
+    body: [
+      `<strong>${o.studio}</strong> has sent proof ${o.round} for order <strong>${o.code}</strong>.`,
+      `Check it carefully. Once you approve it, that version goes to print, and errors visible in an approved proof can't be refunded.`,
+    ],
+    cta: { label: 'Review your proof', url: `${site()}/orders/design/${o.code}` },
+  });
+}
+
+export function revisionRequested(to: string, o: { code: string; note: string }) {
+  return sendEmail({
+    to,
+    subject: `Revision requested — ${o.code}`,
+    heading: 'The customer has asked for changes',
+    body: [`On order <strong>${o.code}</strong>:`, o.note],
+    cta: { label: 'Open your studio', url: `${site()}/studio/jobs` },
+  });
+}
+
+export function designApproved(to: string, o: { code: string }) {
+  return sendEmail({
+    to,
+    subject: `Approved — ${o.code}`,
+    heading: 'Your design was approved',
+    body: [
+      `The customer has approved the final design on order <strong>${o.code}</strong>.`,
+      `This job is complete and will be included in your next settlement.`,
+    ],
+    cta: { label: 'Open your studio', url: `${site()}/studio/jobs` },
   });
 }
