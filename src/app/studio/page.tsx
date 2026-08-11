@@ -41,9 +41,14 @@ export default async function StudioPage() {
           <h1 className="mb-1 font-display text-3xl font-extrabold tracking-tight text-black">My studio</h1>
           <p className="text-black/60">Your public profile, portfolio and prices.</p>
         </div>
-        <a href="/studio/jobs" className="rounded-pill border border-black/20 px-4 py-2 font-display text-[13px] font-bold text-navy hover:border-blue hover:text-blue">
-          Briefs →
-        </a>
+        <div className="flex gap-2">
+          <a href="/studio/jobs" className="rounded-pill border border-black/20 px-4 py-2 font-display text-[13px] font-bold text-navy hover:border-blue hover:text-blue">
+            Briefs →
+          </a>
+          <a href="/studio/earnings" className="rounded-pill border border-black/20 px-4 py-2 font-display text-[13px] font-bold text-navy hover:border-blue hover:text-blue">
+            Earnings →
+          </a>
+        </div>
       </div>
       <StudioClient
         studio={data}
