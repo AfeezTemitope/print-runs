@@ -24,17 +24,58 @@ const BADGE: Record<string, string> = {
   cancelled: 'bg-red/10 text-red',
 };
 
+// Design orders run their own lifecycle, so they need their own labels rather than being
+// forced through statusLabel(), which only knows about print stages.
+const DESIGN_LABEL: Record<string, string> = {
+  brief_received: 'Brief received',
+  in_progress: 'Designer working',
+  proof_ready: 'Your review needed',
+  revision_requested: 'Changes requested',
+  approved: 'Design ready',
+  cancelled: 'Cancelled',
+};
+
+const DESIGN_BADGE: Record<string, string> = {
+  brief_received: 'bg-pale text-navy',
+  in_progress: 'bg-blue text-white',
+  proof_ready: 'bg-red text-white',
+  revision_requested: 'bg-blue text-white',
+  approved: 'bg-success/15 text-success',
+  cancelled: 'bg-red/10 text-red',
+};
+
 /** Screen 8 (spec §3): same status data as Track Order, different view. */
 export default async function OrdersPage() {
   const session = (await getSession())!;
-  const rows = await db().select({
-    order: tables.orders,
-    shopName: tables.shops.businessName,
-  })
-    .from(tables.orders)
-    .innerJoin(tables.shops, eq(tables.orders.shopId, tables.shops.id))
-    .where(eq(tables.orders.customerId, session.uid))
-    .orderBy(desc(tables.orders.createdAt));
+  const [rows, designRows] = await Promise.all([
+    db().select({
+      order: tables.orders,
+      shopName: tables.shops.businessName,
+    })
+      .from(tables.orders)
+      .innerJoin(tables.shops, eq(tables.orders.shopId, tables.shops.id))
+      .where(eq(tables.orders.customerId, session.uid))
+      .orderBy(desc(tables.orders.createdAt)),
+    db().select({
+      order: tables.designOrders,
+      studioName: tables.designerStudios.displayName,
+    })
+      .from(tables.designOrders)
+      .leftJoin(tables.designerStudios, eq(tables.designOrders.studioId, tables.designerStudios.id))
+      .where(eq(tables.designOrders.customerId, session.uid))
+      .orderBy(desc(tables.designOrders.createdAt)),
+  ]);
+
+  // Print and design jobs interleave by date. A customer thinks in terms of "things I ordered",
+  // not in terms of which table they landed in.
+  type Row =
+    | { kind: 'print'; at: Date; order: (typeof rows)[number]['order']; shopName: string }
+    | { kind: 'design'; at: Date; order: (typeof designRows)[number]['order']; studioName: string | null };
+
+  const merged: Row[] = [
+    ...rows.map((r) => ({ kind: 'print' as const, at: r.order.createdAt, order: r.order, shopName: r.shopName })),
+    ...designRows.map((r) => ({ kind: 'design' as const, at: r.order.createdAt, order: r.order, studioName: r.studioName })),
+  ].sort((a, b) => b.at.getTime() - a.at.getTime());
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
@@ -42,7 +83,7 @@ export default async function OrdersPage() {
         My <span className="text-blue">orders</span>
       </h1>
 
-      {rows.length === 0 ? (
+      {merged.length === 0 ? (
         <div className="mt-8">
           <EmptyState
             title="No orders yet"
@@ -52,7 +93,32 @@ export default async function OrdersPage() {
         </div>
       ) : (
         <ul className="mt-8 divide-y divide-dashed divide-black/15 rounded-2xl border border-black/12 bg-white">
-          {rows.map(({ order, shopName }) => {
+          {merged.map((row) => {
+            if (row.kind === 'design') {
+              const o = row.order;
+              return (
+                <li key={o.id}>
+                  <Link href={`/orders/design/${o.code}`} className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 transition-colors hover:bg-pale/20">
+                    <div>
+                      <p className="font-display font-extrabold text-navy">
+                        {o.serviceTitle}
+                        <span className="ml-2 font-mono text-xs font-bold text-black/45">{o.code}</span>
+                      </p>
+                      <p className="mt-0.5 text-[13px] text-black/50">
+                        {row.studioName ?? 'Designer'} · {shortDate(o.createdAt)}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className={`rounded-pill px-3 py-1 font-mono text-[10px] font-bold uppercase tracking-widest ${DESIGN_BADGE[o.status] ?? 'bg-pale text-navy'}`}>
+                        {DESIGN_LABEL[o.status] ?? o.status}
+                      </span>
+                      <span className="font-display font-extrabold text-navy">{naira(o.amountPaidKobo)}</span>
+                    </div>
+                  </Link>
+                </li>
+              );
+            }
+            const { order, shopName } = row;
             const isPendingQuote = order.isQuote && order.paymentStatus === 'unpaid';
             const label = isPendingQuote
               ? 'Quote requested'

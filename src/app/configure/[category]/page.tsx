@@ -2,6 +2,9 @@ import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { getCategory, LIVE_CATEGORIES, needsTypeSelection } from '@/lib/categories';
 import { getCatalogPhotos, pickPhoto } from '@/lib/photos';
+import { approvedDesignFor } from '@/lib/design-handoff';
+
+const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
 import { Configurator } from './Configurator';
 import { TypeSelect } from './TypeSelect';
 
@@ -21,19 +24,36 @@ export async function generateMetadata({ params }: { params: Promise<{ category:
   };
 }
 
-export default async function ConfigurePage({ params }: { params: Promise<{ category: string }> }) {
+export default async function ConfigurePage({
+  params, searchParams,
+}: {
+  params: Promise<{ category: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const cat = getCategory((await params).category);
   if (!cat || !cat.live || !cat.listings.length) notFound();
 
   // QA 1.1: more than one type → the photo-led type-selection page comes first. A single-type
   // category has nothing to choose, so it goes straight to the configurator.
   const photos = await getCatalogPhotos();
-  if (needsTypeSelection(cat)) return <TypeSelect category={cat} photos={photos} />;
+  const design = one((await searchParams).design);
+
+  if (needsTypeSelection(cat)) {
+    return (
+      <TypeSelect
+        category={cat}
+        photos={photos}
+        carry={design ? `?design=${encodeURIComponent(design)}` : ''}
+      />
+    );
+  }
+
   return (
     <Configurator
       category={cat}
       listing={cat.listings[0]}
       photoUrl={pickPhoto(photos, cat.slug, cat.listings[0].slug)}
+      prefillFile={await approvedDesignFor(design)}
     />
   );
 }

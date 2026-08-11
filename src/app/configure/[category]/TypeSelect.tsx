@@ -9,7 +9,9 @@ import { pickPhoto, type PhotoMap } from '@/lib/photos';
  * one photo-led card per type, and only after choosing does the customer reach the
  * configurator. Real photography replaces the glyph panel when it lands (QA 1.8).
  */
-export function TypeSelect({ category, photos }: { category: Category; photos: PhotoMap }) {
+export function TypeSelect({
+  category, photos, carry = '',
+}: { category: Category; photos: PhotoMap; carry?: string }) {
   return (
     <div className="mx-auto max-w-5xl px-4 py-10 sm:px-6">
       <p className="font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-blue">Choose a type</p>
@@ -20,7 +22,7 @@ export function TypeSelect({ category, photos }: { category: Category; photos: P
         {category.listings.map((l) => (
           <li key={l.slug}>
             <Link
-              href={`/configure/${category.slug}/${l.slug}`}
+              href={`/configure/${category.slug}/${l.slug}${carry}`}
               className="group flex h-full flex-col overflow-hidden rounded-2xl border border-black/12 bg-white transition-all hover:-translate-y-0.5 hover:border-blue"
             >
               <ProductImage

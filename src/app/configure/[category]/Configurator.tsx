@@ -17,8 +17,14 @@ import { Field, Input, Select, Textarea } from '@/components/ui/Field';
  * already chosen on the page before this one, so there is no type switcher in here.
  */
 export function Configurator({
-  category, listing, photoUrl,
-}: { category: Category; listing: Listing; photoUrl?: string }) {
+  category, listing, photoUrl, prefillFile,
+}: {
+  category: Category;
+  listing: Listing;
+  photoUrl?: string;
+  /** An approved design carried over from the design marketplace (QA: no re-upload). */
+  prefillFile?: { url: string; name: string; designCode: string };
+}) {
   const router = useRouter();
 
   const sizeCfg = listing.size;
@@ -42,7 +48,9 @@ export function Configurator({
     ),
   );
   const [note, setNote] = useState('');
-  const [file, setFile] = useState<{ url: string; name: string } | null>(null);
+  const [file, setFile] = useState<{ url: string; name: string } | null>(
+    prefillFile ? { url: prefillFile.url, name: prefillFile.name } : null,
+  );
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState<string | null>(null);
 
@@ -267,6 +275,11 @@ export function Configurator({
 
           <div>
             <span className="mb-2 block font-display text-[13px] font-bold text-navy">Design file</span>
+            {prefillFile && file?.url === prefillFile.url && (
+              <p className="mb-2 rounded-xl border border-blue/30 bg-blue/5 px-3.5 py-2 text-[13px] text-navy">
+                Using your approved design from {prefillFile.designCode}. Remove it to upload something else.
+              </p>
+            )}
             {file ? (
               <div className="flex items-center justify-between rounded-xl border border-success/40 bg-success/5 px-4 py-3">
                 <span className="flex items-center gap-2 text-sm font-semibold text-navy">

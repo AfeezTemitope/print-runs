@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import Image from 'next/image';
 import { and, desc, eq } from 'drizzle-orm';
@@ -86,10 +87,18 @@ export default async function DesignOrderPage({ params }: { params: Promise<{ co
           <p className="mt-1 text-[14px] text-black/70">
             Approved {order.approvedAt ? shortDate(order.approvedAt) : ''}. Download it, or use it on a print order.
           </p>
-          <a href={order.finalFileUrl} target="_blank" rel="noreferrer"
-            className="mt-3 inline-block rounded-pill bg-blue px-5 py-2.5 font-display text-sm font-bold text-white">
-            Download final design
-          </a>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {/* The whole point of the marketplace: the approved file carries straight into a
+                print order rather than being downloaded and uploaded again. */}
+            <Link href={`/products?design=${order.code}`}
+              className="rounded-pill bg-blue px-5 py-2.5 font-display text-sm font-bold text-white transition-colors hover:bg-navy">
+              Print this design <span aria-hidden>→</span>
+            </Link>
+            <a href={order.finalFileUrl} target="_blank" rel="noreferrer"
+              className="rounded-pill border border-black/20 px-5 py-2.5 font-display text-sm font-bold text-navy">
+              Download
+            </a>
+          </div>
         </section>
       )}
 

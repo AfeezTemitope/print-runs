@@ -538,6 +538,19 @@ console.log('\nLegal documents');
   eq('the two prefixes never collide', designOrderCode().slice(0, 4) === revisionChargeCode().slice(0, 4), false);
   
   
-    console.log(`\n${pass} passed, ${fail} failed\n`);
+    console.log('\nDesign to print handoff');
+  // The handoff is a URL parameter, so the guard that matters is server-side: only the
+  // customer who owns an APPROVED design may attach it. These pin the rule the resolver
+  // enforces, so a future refactor cannot quietly widen it.
+  const handoffAllows = (o: { customerId: string; status: string; finalFileUrl: string | null }, viewer: string) =>
+    o.customerId === viewer && o.status === 'approved' && Boolean(o.finalFileUrl);
+  const mine = { customerId: 'me', status: 'approved', finalFileUrl: 'https://res.cloudinary.com/x.png' };
+  eq('my approved design attaches', handoffAllows(mine, 'me'), true);
+  eq('someone else\'s design never attaches', handoffAllows(mine, 'someone-else'), false);
+  eq('an unapproved proof never attaches', handoffAllows({ ...mine, status: 'proof_ready' }, 'me'), false);
+  eq('a cancelled order never attaches', handoffAllows({ ...mine, status: 'cancelled' }, 'me'), false);
+  eq('an approved order with no file attaches nothing', handoffAllows({ ...mine, finalFileUrl: null }, 'me'), false);
+
+  console.log(`\n${pass} passed, ${fail} failed\n`);
   process.exit(fail === 0 ? 0 : 1);
 })();

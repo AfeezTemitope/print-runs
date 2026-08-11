@@ -2,6 +2,9 @@ import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { getCategory, getListing, liveListings } from '@/lib/categories';
 import { getCatalogPhotos, pickPhoto } from '@/lib/photos';
+import { approvedDesignFor } from '@/lib/design-handoff';
+
+const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
 import { Configurator } from '../Configurator';
 
 export function generateStaticParams() {
@@ -22,7 +25,10 @@ export async function generateMetadata(
 }
 
 export default async function ConfigureListingPage(
-  { params }: { params: Promise<{ category: string; listing: string }> },
+  { params, searchParams }: {
+    params: Promise<{ category: string; listing: string }>;
+    searchParams: Promise<Record<string, string | string[] | undefined>>;
+  },
 ) {
   const { category, listing } = await params;
   const cat = getCategory(category);
@@ -31,5 +37,13 @@ export default async function ConfigureListingPage(
   if (!l) notFound();
 
   const photos = await getCatalogPhotos();
-  return <Configurator category={cat} listing={l} photoUrl={pickPhoto(photos, cat.slug, l.slug)} />;
+  const design = one((await searchParams).design);
+  return (
+    <Configurator
+      category={cat}
+      listing={l}
+      photoUrl={pickPhoto(photos, cat.slug, l.slug)}
+      prefillFile={await approvedDesignFor(design)}
+    />
+  );
 }
