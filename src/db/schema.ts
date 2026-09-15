@@ -110,6 +110,9 @@ export const shops = pgTable('shops', {
   lat: doublePrecision('lat'),
   lng: doublePrecision('lng'),
   openingHours: text('opening_hours'),
+  // Shown publicly on the storefront (Module 1, Section 3 step 2) — optional but recommended,
+  // because it is how Lagos customers actually expect to reach a printer.
+  whatsapp: text('whatsapp'),
   ratingAvg: doublePrecision('rating_avg').notNull().default(0),
   ratingCount: integer('rating_count').notNull().default(0),
   isActive: boolean('is_active').notNull().default(true),
@@ -150,6 +153,87 @@ export const platformSettings = pgTable('platform_settings', {
   valueKobo: integer('value_kobo').notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+/* ------------------------------------------------------------------ */
+/* V2 storefront model (Module 1)                                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Module 1 replaces the fixed eight-product catalogue with printer-controlled storefronts.
+ * PrintRuns owns the top-level categories (in code, src/lib/catalog.ts — they are not editable
+ * by anyone, so they need no table). Everything below belongs to the printer.
+ */
+
+/** Quantity tiers / Per piece / Per sq.ft — chosen per listing, never per category. */
+export const listingPricingMode = pgEnum('listing_pricing_mode', ['tier', 'piece', 'area', 'quote']);
+export const areaUnitEnum = pgEnum('listing_area_unit', ['sqft', 'sqin']);
+
+/**
+ * A printer's own sub-category. Platform suggestions are copied in as rows when a printer
+ * picks them, so a printer can rename "Brand Sticker" to whatever their customers call it
+ * without affecting anyone else. isCustom records whether they typed it themselves, which is
+ * what admin reviews to spot names worth promoting to platform-wide suggestions.
+ */
+export const subcategories = pgTable('subcategories', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  shopId: uuid('shop_id').notNull().references(() => shops.id, { onDelete: 'cascade' }),
+  categorySlug: text('category_slug').notNull(),
+  name: text('name').notNull(),
+  isCustom: boolean('is_custom').notNull().default(false),
+  sortOrder: integer('sort_order').notNull().default(0),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  index('subcat_shop_idx').on(t.shopId, t.categorySlug),
+  uniqueIndex('subcat_shop_name_uq').on(t.shopId, t.categorySlug, t.name),
+]);
+
+/**
+ * One product a printer sells, in their own words. This is where V2's flexibility lives: the
+ * printer names it, describes it, photographs it and prices it however they think about it.
+ */
+export const listings = pgTable('listings', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  shopId: uuid('shop_id').notNull().references(() => shops.id, { onDelete: 'cascade' }),
+  subcategoryId: uuid('subcategory_id').references(() => subcategories.id, { onDelete: 'set null' }),
+  // Denormalised so category search does not need to join through subcategories.
+  categorySlug: text('category_slug').notNull(),
+
+  name: text('name').notNull(),
+  description: text('description'),
+  photos: jsonb('photos').$type<string[]>().notNull().default([]), // max 3, enforced in the action
+
+  pricingMode: listingPricingMode('pricing_mode').notNull().default('quote'),
+  // piece mode
+  ratePerPieceKobo: integer('rate_per_piece_kobo'),
+  // area mode
+  ratePerAreaKobo: integer('rate_per_area_kobo'),
+  areaUnit: areaUnitEnum('area_unit'),
+  /**
+   * Restored by founder decision Sept 2026, reversing QA 3.1. Protects a printer against a
+   * very small custom size calculating out below their base cost.
+   */
+  minChargeKobo: integer('min_charge_kobo'),
+
+  minimumOrder: integer('minimum_order'),
+  turnaroundHours: integer('turnaround_hours').notNull().default(24),
+  isActive: boolean('is_active').notNull().default(true),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  index('listings_shop_idx').on(t.shopId, t.isActive),
+  index('listings_category_idx').on(t.categorySlug, t.isActive),
+  index('listings_subcat_idx').on(t.subcategoryId),
+]);
+
+/** Up to MAX_TIERS rows per listing where pricingMode = 'tier'. */
+export const listingTiers = pgTable('listing_tiers', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  listingId: uuid('listing_id').notNull().references(() => listings.id, { onDelete: 'cascade' }),
+  quantity: integer('quantity').notNull(),
+  priceKobo: integer('price_kobo').notNull(),
+}, (t) => [
+  uniqueIndex('listing_tier_qty_uq').on(t.listingId, t.quantity),
+]);
 
 /* ------------------------------------------------------------------ */
 /* Designers (Batch 4)                                                 */

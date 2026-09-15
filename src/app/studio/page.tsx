@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getSession } from '@/lib/auth';
 import { getMyStudio, studioWorks, studioServices } from '@/lib/designers';
@@ -42,12 +43,12 @@ export default async function StudioPage() {
           <p className="text-black/60">Your public profile, portfolio and prices.</p>
         </div>
         <div className="flex gap-2">
-          <a href="/studio/jobs" className="rounded-pill border border-black/20 px-4 py-2 font-display text-[13px] font-bold text-navy hover:border-blue hover:text-blue">
+          <Link href="/studio/jobs" className="rounded-pill border border-black/20 px-4 py-2 font-display text-[13px] font-bold text-navy hover:border-blue hover:text-blue">
             Briefs →
-          </a>
-          <a href="/studio/earnings" className="rounded-pill border border-black/20 px-4 py-2 font-display text-[13px] font-bold text-navy hover:border-blue hover:text-blue">
+          </Link>
+          <Link href="/studio/earnings" className="rounded-pill border border-black/20 px-4 py-2 font-display text-[13px] font-bold text-navy hover:border-blue hover:text-blue">
             Earnings →
-          </a>
+          </Link>
         </div>
       </div>
       <StudioClient

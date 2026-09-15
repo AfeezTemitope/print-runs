@@ -16,6 +16,15 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { photoKey, pickPhoto } from '../src/lib/photos';
 import { marginFor } from '../src/lib/margins';
 import { isVerified } from '../src/lib/verification';
+// Aliased: the V1 categories module exports the same names, and both models coexist until
+// Module 2 replaces the old customer flow.
+import {
+  CATEGORIES as V2_CATEGORIES, LIVE_CATEGORIES as V2_LIVE, BROWSABLE_CATEGORIES,
+  MAX_TIERS, getCategory as v2Category, isLive, isReservedSlug, RESERVED_SLUGS, SUGGESTED_MODE,
+} from '../src/lib/catalog';
+import {
+  computeListingPrice, fromPriceKobo, needsCustomQuantity, validateTiers, sortTiers,
+} from '../src/lib/listing-pricing';
 import {
   DESIGN_MARGIN_KOBO, computeDesignTotals, freeRevisionsLeft,
   canRequestRevision, needsPaidRevision, canApprove,
@@ -308,7 +317,7 @@ eq('no minimum-charge floor is applied', banner.ok && banner.totalKobo, N(1800))
 
 console.log('\nIntegrity');
 eq('all live categories have a name', LIVE_CATEGORIES.every((c) => c.name.length > 0), true);
-eq('no duplicate slugs', new Set(CATEGORIES.map((c) => c.slug)).size, CATEGORIES.length);
+eq('no duplicate slugs', new Set(V2_CATEGORIES.map((c) => c.slug)).size, V2_CATEGORIES.length);
 eq('every live category has at least one listing', LIVE_CATEGORIES.every((c) => c.listings.length > 0), true);
 // Every grid axis must be resolvable from something the configurator can actually collect.
 const RESOLVABLE = new Set(['size', 'qty', 'qty_range', 'sheets', 'option']);
@@ -550,6 +559,90 @@ console.log('\nLegal documents');
   eq('an unapproved proof never attaches', handoffAllows({ ...mine, status: 'proof_ready' }, 'me'), false);
   eq('a cancelled order never attaches', handoffAllows({ ...mine, status: 'cancelled' }, 'me'), false);
   eq('an approved order with no file attaches nothing', handoffAllows({ ...mine, finalFileUrl: null }, 'me'), false);
+
+console.log('\nV2 category system (Module 1)');
+  eq('nine top-level categories', V2_CATEGORIES.length, 9);
+  eq('seven are live at launch', V2_LIVE.length, 7);
+  // Founder decision Sept 2026: Apparel is Coming Soon, Frames stays hidden.
+  eq('apparel is coming soon, not live', v2Category('apparel-merch')?.status, 'coming_soon');
+  eq('frames stays hidden', v2Category('frames-photo')?.status, 'hidden');
+  eq('apparel is browsable but not orderable', BROWSABLE_CATEGORIES.some((c) => c.slug === 'apparel-merch'), true);
+  eq('frames is not browsable', BROWSABLE_CATEGORIES.some((c) => c.slug === 'frames-photo'), false);
+  eq('a printer cannot list under apparel', isLive('apparel-merch'), false);
+  eq('a printer cannot list under frames', isLive('frames-photo'), false);
+  eq('every category has suggestions', V2_CATEGORIES.every((c) => c.suggested.length > 0), true);
+  eq('no duplicate category slugs', new Set(V2_CATEGORIES.map((c) => c.slug)).size, V2_CATEGORIES.length);
+  eq('every live category has a suggested pricing mode',
+    V2_LIVE.every((c) => Boolean(SUGGESTED_MODE[c.slug])), true);
+
+  console.log('\nReserved storefront slugs');
+  // printruns.ng/[slug] shares a namespace with every top-level route, so a printer named
+  // "Products" must not be able to take over the products page.
+  eq('products is reserved', isReservedSlug('products'), true);
+  eq('admin is reserved', isReservedSlug('admin'), true);
+  eq('designers is reserved', isReservedSlug('designers'), true);
+  eq('reservation ignores case', isReservedSlug('Products'), true);
+  eq('an ordinary business name is free', isReservedSlug('cubicprints'), false);
+  // Every real route must be covered, or a live page gets shadowed by a storefront.
+  for (const route of ['products', 'orders', 'checkout', 'track', 'faq', 'legal', 'designers', 'studio', 'dashboard', 'admin', 'login', 'register', 'printers', 'configure', 'design', 'api']) {
+    eq(`route /${route} is protected`, RESERVED_SLUGS.has(route), true);
+  }
+
+  console.log('\nThree pricing modes (Module 1 §5)');
+  const baseListing = {
+    id: 'l', shopId: 's', subcategoryId: null, categorySlug: 'stickers-labels',
+    name: 'x', description: null, photos: [], pricingMode: 'tier' as const,
+    ratePerPieceKobo: null, ratePerAreaKobo: null, areaUnit: null, minChargeKobo: null,
+    minimumOrder: null, turnaroundHours: 24, isActive: true,
+    createdAt: new Date(), updatedAt: new Date(),
+  };
+  const tier = (quantity: number, naira: number) => ({ id: `t${quantity}`, listingId: 'l', quantity, priceKobo: N(naira) });
+  const tiers = [tier(500, 40000), tier(100, 10000), tier(200, 18000)];
+
+  // Tiers are flat batch prices, never multiplied.
+  const t100 = computeListingPrice(baseListing, tiers, { qty: 100 });
+  eq('a tier price is the batch total', t100.ok && t100.totalKobo, N(10000));
+  // §5.1: above the top tier routes to Request Quote rather than extrapolating.
+  const t900 = computeListingPrice(baseListing, tiers, { qty: 900 });
+  eq('above the top tier does not extrapolate', t900.ok, false);
+  eq('and offers a custom quantity', needsCustomQuantity(baseListing, tiers, 900), true);
+  // A quantity BETWEEN tiers is not a price either — the printer named specific batches.
+  eq('between tiers is not rounded', computeListingPrice(baseListing, tiers, { qty: 150 }).ok, false);
+  eq('tiers sort by quantity regardless of entry order', sortTiers(tiers).map((t) => t.quantity), [100, 200, 500]);
+  eq('from-price is the cheapest tier', fromPriceKobo(baseListing, tiers), N(10000));
+
+  const piece = { ...baseListing, pricingMode: 'piece' as const, ratePerPieceKobo: N(250), minimumOrder: 50 };
+  const p80 = computeListingPrice(piece, [], { qty: 80 });
+  eq('per piece multiplies by quantity', p80.ok && p80.totalKobo, N(20000));
+  eq('below the minimum order is refused', computeListingPrice(piece, [], { qty: 10 }).ok, false);
+  // Quoting the single-unit rate on a listing with a minimum of 50 would advertise a price
+  // nobody can actually buy.
+  eq('from-price respects the minimum order', fromPriceKobo(piece, []), N(12500));
+
+  const area = { ...baseListing, pricingMode: 'area' as const, ratePerAreaKobo: N(1800), areaUnit: 'sqft' as const };
+  const a = computeListingPrice(area, [], { width: 3, height: 4 });
+  eq('per area is width x height x rate', a.ok && a.totalKobo, N(21600));
+  eq('missing dimensions route to quote', computeListingPrice(area, [], {}).ok, false);
+
+  // Minimum charge, restored by founder decision (reversing QA 3.1).
+  const floored = { ...area, minChargeKobo: N(5000) };
+  const tiny = computeListingPrice(floored, [], { width: 1, height: 1 });
+  eq('a tiny size is lifted to the minimum charge', tiny.ok && tiny.totalKobo, N(5000));
+  const big = computeListingPrice(floored, [], { width: 5, height: 5 });
+  eq('a large size is unaffected by the floor', big.ok && big.totalKobo, N(45000));
+  // The floor is per unit — ten tiny banners must not clear a floor meant to cover one.
+  const ten = computeListingPrice(floored, [], { width: 1, height: 1, qty: 10 });
+  eq('the floor applies per unit, not per order', ten.ok && ten.totalKobo, N(50000));
+
+  console.log('\nTier validation');
+  eq('at least one tier is required', validateTiers([]), 'Set at least one quantity and price.');
+  eq('duplicate quantities are rejected',
+    validateTiers([{ quantity: 100, priceKobo: 1 }, { quantity: 100, priceKobo: 2 }]),
+    'Each tier needs a different quantity.');
+  eq(`more than ${MAX_TIERS} tiers are rejected`,
+    validateTiers([1, 2, 3, 4].map((q) => ({ quantity: q * 100, priceKobo: q }))),
+    `You can set up to ${MAX_TIERS} tiers.`);
+  eq('three valid tiers pass', validateTiers([1, 2, 3].map((q) => ({ quantity: q * 100, priceKobo: q }))), null);
 
   console.log(`\n${pass} passed, ${fail} failed\n`);
   process.exit(fail === 0 ? 0 : 1);
