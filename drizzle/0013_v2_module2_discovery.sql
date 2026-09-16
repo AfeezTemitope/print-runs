@@ -1,0 +1,1 @@
+ALTER TABLE "shops" ADD COLUMN "verification_tier" integer DEFAULT 1 NOT NULL;

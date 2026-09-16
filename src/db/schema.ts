@@ -113,6 +113,12 @@ export const shops = pgTable('shops', {
   // Shown publicly on the storefront (Module 1, Section 3 step 2) — optional but recommended,
   // because it is how Lagos customers actually expect to reach a printer.
   whatsapp: text('whatsapp'),
+  /**
+   * Two-tier verification (Module 4 §1, brought forward because discovery needs it).
+   * 1 = Basic, auto-approved on signup, live but no badge.
+   * 2 = Verified, admin-approved against CAC or a work permit — this is what shows the badge.
+   */
+  verificationTier: integer('verification_tier').notNull().default(1),
   ratingAvg: doublePrecision('rating_avg').notNull().default(0),
   ratingCount: integer('rating_count').notNull().default(0),
   isActive: boolean('is_active').notNull().default(true),

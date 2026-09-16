@@ -29,16 +29,16 @@ export function Hero() {
             and track it to your door — Island and Mainland.
           </p>
           <div className="mt-8 flex flex-wrap items-center gap-3">
+            {/*
+              Module 2 §1: two entry points, side by side. Start Printing is for a customer who
+              knows what they want to print; Marketplace is for one who wants to browse printers.
+              Both converge on the same listing detail and the same order flow.
+
+              Request Designer used to sit here. It moves to the design-file step of the order
+              flow, which is where a customer discovers they don't have artwork.
+            */}
             <ButtonLink href="/products">Start Printing <span aria-hidden>→</span></ButtonLink>
-            {/* Request Designer is paused for V1 — visible but disabled so the layout holds (spec §8). */}
-            <span className="relative inline-flex">
-              <ButtonLink href="#" variant="secondary" aria-disabled className="pointer-events-none opacity-60">
-                Request Designer
-              </ButtonLink>
-              <span className="absolute -right-2 -top-2 rounded-pill bg-navy px-2 py-0.5 font-mono text-[9px] font-bold uppercase tracking-widest text-pale">
-                Soon
-              </span>
-            </span>
+            <ButtonLink href="/marketplace" variant="secondary">Marketplace</ButtonLink>
           </div>
         </div>
 

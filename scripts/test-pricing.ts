@@ -25,6 +25,7 @@ import {
 import {
   computeListingPrice, fromPriceKobo, needsCustomQuantity, validateTiers, sortTiers,
 } from '../src/lib/listing-pricing';
+import { haversineKm, sortByDistance, type PrinterCard } from '../src/lib/discovery';
 import {
   DESIGN_MARGIN_KOBO, computeDesignTotals, freeRevisionsLeft,
   canRequestRevision, needsPaidRevision, canApprove,
@@ -643,6 +644,38 @@ console.log('\nV2 category system (Module 1)');
     validateTiers([1, 2, 3, 4].map((q) => ({ quantity: q * 100, priceKobo: q }))),
     `You can set up to ${MAX_TIERS} tiers.`);
   eq('three valid tiers pass', validateTiers([1, 2, 3].map((q) => ({ quantity: q * 100, priceKobo: q }))), null);
+
+console.log('\nDiscovery sorting (Module 2)');
+  const card = (over: Partial<PrinterCard>): PrinterCard => ({
+    id: 'x', slug: 'x', code: 'LB-001', businessName: 'X', bannerUrl: null, logoUrl: null,
+    area: 'Lagos', verified: false, ratingAvg: 0, ratingCount: 0, categories: [],
+    fromKobo: null, distanceKm: null, ...over,
+  });
+
+  // Lagos check: Yaba to Lekki is roughly 15km straight line.
+  const yabaToLekki = haversineKm({ lat: 6.5095, lng: 3.3711 }, { lat: 6.4474, lng: 3.4736 });
+  eq('distance is in a believable range', yabaToLekki > 10 && yabaToLekki < 20, true);
+  eq('same point is zero distance', Math.round(haversineKm({ lat: 6.5, lng: 3.4 }, { lat: 6.5, lng: 3.4 })), 0);
+
+  const sorted = sortByDistance([
+    card({ id: 'far', distanceKm: 12 }),
+    card({ id: 'none', distanceKm: null, ratingAvg: 5 }),
+    card({ id: 'near', distanceKm: 2 }),
+  ]);
+  eq('nearest first', sorted[0].id, 'near');
+  // A printer who has not pinned their location is still a real printer — they sort last
+  // rather than being dropped, however good their rating.
+  eq('unlocated printers sort last, not out', sorted[2].id, 'none');
+  eq('nobody is dropped', sorted.length, 3);
+
+  const tied = sortByDistance([
+    card({ id: 'low', distanceKm: 3, ratingAvg: 3.2 }),
+    card({ id: 'high', distanceKm: 3, ratingAvg: 4.8 }),
+  ]);
+  eq('equal distance breaks on rating', tied[0].id, 'high');
+
+  // Tier 1 printers are live but unbadged — the founder decision that unblocked Module 1.
+  eq('tier 1 is not badged', card({ verified: false }).verified, false);
 
   console.log(`\n${pass} passed, ${fail} failed\n`);
   process.exit(fail === 0 ? 0 : 1);

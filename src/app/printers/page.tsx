@@ -1,189 +1,97 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { and, eq, gte, lte, inArray } from 'drizzle-orm';
-import { MapPin, Star, Clock } from 'lucide-react';
-import { db, tables } from '@/db';
-import { getCategory } from '@/lib/categories';
-import { computePrice, productMatchesSpec, computeMargin, getPlatformFeeKobo } from '@/lib/pricing';
-import { getCategoryMargins, marginFor } from '@/lib/margins';
-import { getVerifiedPairs, isVerified } from '@/lib/verification';
-import { specFromParams } from '@/lib/spec';
-import { distanceKm, bbox, LAGOS } from '@/lib/geo';
-import { naira } from '@/lib/format';
-import { CodeBadge } from '@/components/ui/CodeBadge';
-import { ButtonLink } from '@/components/ui/Button';
+import { Suspense } from 'react';
+import { getCategory, LIVE_CATEGORIES } from '@/lib/catalog';
+import { findPrinters } from '@/lib/discovery';
+import { SearchBar } from '@/components/discovery/SearchBar';
+import { PrinterCard } from '@/components/discovery/PrinterCard';
 import { EmptyState } from '@/components/ui/EmptyState';
-import { LocateGate } from './LocateGate';
 
-export const metadata: Metadata = { title: 'Choose a printer' };
-export const dynamic = 'force-dynamic';
+export const metadata: Metadata = { title: 'Printers near you' };
 
-type SP = Record<string, string | string[] | undefined>;
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
 
 /**
- * Screen 4 (spec §3): auto-detect location → nearby printers who can fulfil
- * this exact spec, sorted by distance. Fixed price, or the dashed
- * "Request quote" state when a printer hasn't priced this spec.
+ * Path A results (§3.3): every printer with at least one active listing in this category,
+ * sorted by distance. No filters at launch — the roster is too small to need narrowing, and
+ * an empty filtered list reads as a broken site rather than a short one.
+ *
+ * Tapping a card deep-links into that printer's listings for this category (§3.4) rather than
+ * their full storefront, because the customer has already said what they want to print.
  */
-export default async function PrintersPage({ searchParams }: { searchParams: Promise<SP> }) {
+export default async function PrintersPage({
+  searchParams,
+}: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const sp = await searchParams;
-  const spec = specFromParams(sp);
-  const cat = spec ? getCategory(spec.category) : undefined;
+  const categorySlug = one(sp.category);
+  const search = one(sp.q);
+  const design = one(sp.design);
 
-  if (!spec || !cat) {
-    return (
-      <div className="mx-auto max-w-3xl px-4 py-16 sm:px-6">
-        <EmptyState
-          title="No spec to match yet"
-          hint="Configure a product first, then we’ll find printers for it."
-          action={<ButtonLink href="/products">Pick a product</ButtonLink>}
-        />
-      </div>
-    );
-  }
+  const category = getCategory(categorySlug);
 
-  const lat = one(sp.lat) ? Number(one(sp.lat)) : null;
-  const lng = one(sp.lng) ? Number(one(sp.lng)) : null;
-  if (lat == null || lng == null) return <LocateGate />;
+  // A typed search may name a category rather than a printer — "stickers" should behave like
+  // tapping the Stickers tile, not return nothing.
+  const matchedByName = !category && search
+    ? LIVE_CATEGORIES.find((c) =>
+        c.name.toLowerCase().includes(search.toLowerCase())
+        || c.suggested.some((s) => s.toLowerCase().includes(search.toLowerCase())))
+    : undefined;
 
-  // Indexed bounding-box prefilter; haversine refines and sorts below.
-  const box = bbox(lat, lng);
-  const shops = await db().select().from(tables.shops).where(and(
-    eq(tables.shops.isActive, true),
-    gte(tables.shops.lat, box.minLat), lte(tables.shops.lat, box.maxLat),
-    gte(tables.shops.lng, box.minLng), lte(tables.shops.lng, box.maxLng),
-  ));
+  const effective = category ?? matchedByName;
+  const printers = await findPrinters({
+    categorySlug: effective?.slug,
+    // Once a category is resolved the free text has done its job; keeping it would also
+    // filter by business name and hide most of the results.
+    search: effective ? undefined : search,
+  });
 
-  const shopIds = shops.map((s) => s.id);
-  const prods = shopIds.length
-    ? await db().select().from(tables.products).where(and(
-        inArray(tables.products.shopId, shopIds),
-        eq(tables.products.categorySlug, spec.category),
-        eq(tables.products.isActive, true),
-      ))
-    : [];
-  const prodIds = prods.map((p) => p.id);
-  const [variants, addons] = prodIds.length
-    ? await Promise.all([
-        db().select().from(tables.productVariants).where(inArray(tables.productVariants.productId, prodIds)),
-        db().select().from(tables.productAddons).where(inArray(tables.productAddons.productId, prodIds)),
-      ])
-    : [[], []];
-
-  // The ₦500 platform service fee is shown at checkout, not folded into the card price —
-  // but we surface it here as a note so the checkout total isn't a surprise.
-  const margins = await getCategoryMargins();
-  const verified = await getVerifiedPairs();
-  const platformFeeKobo = await getPlatformFeeKobo((key) =>
-    db().select().from(tables.platformSettings).where(eq(tables.platformSettings.key, key)).limit(1)
-      .then((rows) => rows[0]),
-  );
-
-  const cards = shops.flatMap((shop) => {
-    // Locked decision: verification is per category. A shop may have prepared products in a
-    // category it has not been cleared for — those must never reach a customer.
-    if (!isVerified(verified, shop.id, spec.category)) return [];
-    const candidates = prods.filter((p) => p.shopId === shop.id && productMatchesSpec(spec, p));
-    if (!candidates.length) return [];
-    // Best quotable price wins; otherwise the shop shows as Request Quote.
-    //
-    // V2: the customer must see the SELLING price (printer base + PrintRuns' commercial
-    // margin), not the printer's raw price — otherwise the margin would appear as a
-    // surprise increase at checkout. The margin itself stays invisible (decision 1).
-    // Cheapest is compared on selling price too, since margins differ per product
-    // (Business Card is a percentage, everything else is a fixed amount), so the cheapest
-    // base price is not necessarily the cheapest price to the customer.
-    let best: { productId: string; sellingKobo: number; turnaround: number } | null = null;
-    let quoteProduct = candidates[0];
-    for (const p of candidates) {
-      const r = computePrice(spec, p, variants.filter((v) => v.productId === p.id), addons.filter((a) => a.productId === p.id));
-      if (r.ok) {
-        const sellingKobo = r.totalKobo + computeMargin(r.totalKobo, spec.qty ?? 1, marginFor(margins, p.categorySlug, p));
-        if (!best || sellingKobo < best.sellingKobo) {
-          best = { productId: p.id, sellingKobo, turnaround: p.turnaroundHours };
-        }
-      }
-      if (p.pricingMode === 'quote') quoteProduct = p;
-    }
-    const km = shop.lat != null && shop.lng != null ? distanceKm(lat, lng, shop.lat, shop.lng) : null;
-    return [{ shop, best, quoteProductId: quoteProduct.id, km }];
-  }).sort((a, b) => (a.km ?? 1e9) - (b.km ?? 1e9));
-
-  const query = new URLSearchParams(Object.entries(sp).flatMap(([k, v]) => (one(v) ? [[k, one(v)!]] : []))).toString();
-  const usingFallback = Math.abs(lat - LAGOS.lat) < 0.0001 && Math.abs(lng - LAGOS.lng) < 0.0001;
+  const carry = design ? `&design=${encodeURIComponent(design)}` : '';
 
   return (
-    <div className="mx-auto max-w-4xl px-4 py-10 sm:px-6">
-      <p className="font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-blue">Step 2 of 3</p>
-      <h1 className="mt-1 font-display text-4xl font-extrabold tracking-tight text-black">
-        Printers <span className="text-blue">near you</span>
-      </h1>
-      <p className="mt-2 flex items-center gap-1.5 text-sm text-black/55">
-        <MapPin className="size-4" />
-        {usingFallback ? 'Showing Lagos-wide (location not shared)' : 'Sorted by distance from your location'}
-        · {cat.name}
-      </p>
+    <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6">
+      <Link href="/products" className="font-display text-[13px] font-bold text-black/45 hover:text-blue">
+        ← All products
+      </Link>
 
-      {cards.length === 0 ? (
+      <h1 className="mt-2 font-display text-4xl font-extrabold tracking-tight text-black">
+        {effective ? <>Printers offering <span className="text-blue">{effective.name}</span></> : 'Printers near you'}
+      </h1>
+      {effective && <p className="mt-2 text-black/60">{effective.blurb}</p>}
+
+      <div className="mt-6 max-w-xl">
+        <Suspense fallback={<div className="h-12 rounded-pill bg-black/5" />}>
+          <SearchBar action="/printers" placeholder="Search a product or printer…" />
+        </Suspense>
+      </div>
+
+      {!printers.length ? (
         <div className="mt-8">
           <EmptyState
-            title="No printers for this spec yet"
-            hint="Try a different size or quantity — or check back soon, new printers join weekly."
-            action={<ButtonLink href={`/configure/${cat.slug}`} variant="secondary">Adjust spec</ButtonLink>}
+            title={effective ? `No printers for ${effective.name} yet` : 'Nothing matched that'}
+            hint="Try another category, or browse every printer in the Marketplace."
           />
+          <p className="mt-4 text-center">
+            <Link href="/marketplace" className="font-display text-sm font-bold text-blue underline">
+              Browse the Marketplace →
+            </Link>
+          </p>
         </div>
       ) : (
-        <ul className="mt-8 space-y-4">
-          {cards.map(({ shop, best, quoteProductId, km }) => {
-            const href = `/checkout?${query}&shop=${shop.id}&product=${best ? best.productId : quoteProductId}${best ? '' : '&quote=1'}`;
-            return (
-              <li
-                key={shop.id}
-                className={`rounded-2xl bg-white p-5 sm:p-6 ${best ? 'border border-black/12' : 'border border-dashed border-black/30'}`}
-              >
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <div className="flex items-center gap-2.5">
-                      <h2 className="font-display text-xl font-extrabold tracking-tight text-navy">{shop.businessName}</h2>
-                      <CodeBadge code={shop.code} />
-                    </div>
-                    <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-black/55">
-                      {km != null && <span className="flex items-center gap-1"><MapPin className="size-3.5" />{km.toFixed(1)} km away</span>}
-                      {shop.ratingCount > 0 ? (
-                        <span className="flex items-center gap-1"><Star className="size-3.5 fill-pale text-navy" />{shop.ratingAvg.toFixed(1)} ({shop.ratingCount})</span>
-                      ) : (
-                        <span className="font-mono text-[10px] uppercase tracking-widest">New printer</span>
-                      )}
-                      {best && <span className="flex items-center gap-1"><Clock className="size-3.5" />~{best.turnaround}hrs</span>}
-
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    {best ? (
-                      <>
-                        <p className="font-display text-2xl font-extrabold text-navy">{naira(best.sellingKobo)}</p>
-                        <p className="font-mono text-[10px] uppercase tracking-widest text-black/45">
-                          + {naira(platformFeeKobo)} service fee
-                        </p>
-                      </>
-                    ) : (
-                      <p className="font-mono text-[11px] font-bold uppercase tracking-widest text-navy/60">No fixed price<br />for this spec</p>
-                    )}
-                  </div>
-                </div>
-                <div className="mt-4 flex items-center justify-between border-t border-dashed border-black/25 pt-4">
-                  <Link href={href} className="font-display text-sm font-bold text-blue">
-                    {best ? 'View breakdown' : 'What happens next?'}
-                  </Link>
-                  <ButtonLink href={href} size="sm" variant={best ? 'primary' : 'secondary'}>
-                    {best ? 'Select' : 'Request quote'} <span aria-hidden>→</span>
-                  </ButtonLink>
-                </div>
+        <>
+          <p className="mt-6 font-mono text-[11px] font-bold uppercase tracking-widest text-black/45">
+            {printers.length} printer{printers.length === 1 ? '' : 's'} · sorted by distance
+          </p>
+          <ul className="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {printers.map((p) => (
+              <li key={p.id}>
+                <PrinterCard
+                  card={p}
+                  href={effective ? `/${p.slug}?category=${effective.slug}${carry}` : `/${p.slug}`}
+                />
               </li>
-            );
-          })}
-        </ul>
+            ))}
+          </ul>
+        </>
       )}
     </div>
   );
