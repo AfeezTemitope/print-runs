@@ -206,3 +206,21 @@ export function designApproved(to: string, o: { code: string }) {
     cta: { label: 'Open your studio', url: `${site()}/studio/jobs` },
   });
 }
+
+export function quoteReady(
+  to: string,
+  o: { code: string; printer: string; amount: number; note: string },
+) {
+  const naira = `₦${(o.amount / 100).toLocaleString('en-NG')}`;
+  return sendEmail({
+    to,
+    subject: `Your quote for ${o.code}`,
+    heading: 'Your printer has sent a price',
+    body: [
+      `<strong>${o.printer}</strong> has quoted <strong>${naira}</strong> for order <strong>${o.code}</strong>.`,
+      ...(o.note ? [o.note] : []),
+      `Nothing has been charged. Review the quote and pay only if you're happy with it.`,
+    ],
+    cta: { label: 'Review your quote', url: `${site()}/orders` },
+  });
+}

@@ -531,7 +531,17 @@ export const productAddons = pgTable('product_addons', {
 
 export type OrderSpec = {
   category: string;
-  listing?: string;         // QA: the customer-visible type within the category
+  listing?: string;         // legacy: the customer-visible type within the old fixed catalogue
+
+  /**
+   * V2 (Module 2). An order now points at a printer's own listing, and freezes what that
+   * listing said at the moment of purchase. The printer may rename or reprice it afterwards —
+   * the order must still describe what was actually bought.
+   */
+  listingId?: string;
+  listingName?: string;
+  pricingMode?: 'tier' | 'piece' | 'area' | 'quote';
+  priceDetail?: string;
   qty?: number;
   width?: number;
   height?: number;
@@ -549,7 +559,23 @@ export const orders = pgTable('orders', {
   code: text('code').notNull(),
   customerId: uuid('customer_id').notNull().references(() => users.id),
   shopId: uuid('shop_id').notNull().references(() => shops.id),
-  productId: uuid('product_id').notNull().references(() => products.id),
+  /**
+   * Legacy pointer into the retired fixed-catalogue products table. Nullable since V2: an
+   * order now points at listingId instead, and products has been emptied. Kept so historic
+   * orders still resolve rather than being rewritten.
+   */
+  productId: uuid('product_id').references(() => products.id),
+  /** V2: the printer's own listing this order came from. Null on legacy orders. */
+  listingId: uuid('listing_id'),
+  /**
+   * Request Quote (Module 2 §7). The printer names a price through the platform; the customer
+   * accepts and pays, or declines. Kept on the order rather than in a side table because a
+   * quote IS the order — it just has no price yet.
+   */
+  quotedPriceKobo: integer('quoted_price_kobo'),
+  quotedAt: timestamp('quoted_at', { withTimezone: true }),
+  quoteNote: text('quote_note'),
+  quoteDeclinedAt: timestamp('quote_declined_at', { withTimezone: true }),
   spec: jsonb('spec').$type<OrderSpec>().notNull(),
   isQuote: boolean('is_quote').notNull().default(false),
 

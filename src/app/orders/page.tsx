@@ -5,6 +5,7 @@ import { db, tables } from '@/db';
 import { getSession } from '@/lib/auth';
 import { getCategory } from '@/lib/categories';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { QuoteActions } from './quote/QuoteActions';
 import { ButtonLink } from '@/components/ui/Button';
 import { naira, shortDate } from '@/lib/format';
 import { statusLabel } from '@/lib/status';
@@ -119,6 +120,25 @@ export default async function OrdersPage() {
               );
             }
             const { order, shopName } = row;
+            // A quote the printer has answered needs a decision from the customer, so it gets
+            // its own block rather than being another row in a list they might scroll past.
+            if (order.quotedPriceKobo && order.paymentStatus !== 'paid' && order.status !== 'cancelled') {
+              return (
+                <li key={order.id} className="px-5 py-4">
+                  <p className="font-display font-extrabold text-navy">
+                    {order.spec?.listingName ?? 'Custom job'}
+                    <span className="ml-2 font-mono text-xs font-bold text-black/45">{order.code}</span>
+                  </p>
+                  <p className="mt-0.5 text-[13px] text-black/50">{shopName} · {shortDate(order.createdAt)}</p>
+                  <QuoteActions
+                    orderId={order.id}
+                    quotedPriceKobo={order.quotedPriceKobo}
+                    note={order.quoteNote}
+                    printer={shopName}
+                  />
+                </li>
+              );
+            }
             const isPendingQuote = order.isQuote && order.paymentStatus === 'unpaid';
             const label = isPendingQuote
               ? 'Quote requested'

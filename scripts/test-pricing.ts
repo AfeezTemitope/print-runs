@@ -103,7 +103,8 @@ eq('7%→8% moves customer price by ₦200', bcDrift.amountPaidKobo - bc.amountP
 
 console.log('\nRetired pricing modes');
 const productBase = {
-  id: 'p', shopId: 's', categorySlug: 'business_card', listingSlug: 'standard', name: 'BC', description: null,
+  id: 'p', shopId: 's', categorySlug: 'business_card', listingSlug: 'standard', listingId: null,
+  name: 'BC', description: null,
   photoUrl: null, areaUnit: null, ratePerUnitKobo: null, minChargeKobo: null, offersHylet: false,
   marginType: 'fixed' as const, marginFixedKobo: 0, marginPercentBps: 0,
   turnaroundHours: 24, isActive: true, createdAt: new Date(),
@@ -258,7 +259,8 @@ eq('first cell is the first value of every axis', bcCells[0], { sides: 'Front on
 console.log('\nPricing engine — grid resolution');
 type AnyProduct = Parameters<typeof computePrice>[1];
 const product = (over: Partial<AnyProduct> = {}) => ({
-  id: 'p', shopId: 's', categorySlug: 'sticker', listingSlug: 'round', name: 'x', description: null,
+  id: 'p', shopId: 's', categorySlug: 'sticker', listingSlug: 'round', listingId: null,
+  name: 'x', description: null,
   photoUrl: null, pricingMode: 'matrix', areaUnit: null, ratePerUnitKobo: null, minChargeKobo: null,
   offersHylet: false, marginType: 'fixed', marginFixedKobo: 0, marginPercentBps: 0,
   turnaroundHours: 24, isActive: true, createdAt: new Date(), ...over,
@@ -676,6 +678,18 @@ console.log('\nDiscovery sorting (Module 2)');
 
   // Tier 1 printers are live but unbadged — the founder decision that unblocked Module 1.
   eq('tier 1 is not badged', card({ verified: false }).verified, false);
+
+console.log('\nQuote pricing (Module 2 §7)');
+  // A printer quotes what THEY want to earn. The margin and platform fee are added on top at
+  // payment, never quoted by the printer — what PrintRuns earns is not theirs to set.
+  const quoteBase = N(45000);
+  const quoteMargin = computeMargin(quoteBase, 1, { marginType: 'fixed', marginFixedKobo: N(500), marginPercentBps: 0 });
+  eq('printer keeps exactly what they quoted', quoteBase, N(45000));
+  eq('margin is added on top', quoteMargin, N(500));
+  eq('customer pays quote + margin + fee', quoteBase + quoteMargin + N(500), N(46000));
+  // A percentage margin is taken against the quoted price, not an invented base.
+  eq('percent margin applies to the quote',
+    computeMargin(N(10000), 1, { marginType: 'percent', marginFixedKobo: 0, marginPercentBps: 700 }), N(700));
 
   console.log(`\n${pass} passed, ${fail} failed\n`);
   process.exit(fail === 0 ? 0 : 1);
