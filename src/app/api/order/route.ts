@@ -10,6 +10,7 @@ import { LEGAL_VERSION } from '@/lib/legal';
 import { paystackInitialize } from '@/lib/paystack';
 import { orderCode } from '@/lib/format';
 import type { PendingOrderMetadata } from '@/lib/settle';
+import { PREFLIGHT_FEE_KOBO } from '@/lib/preflight-fee';
 
 /**
  * V2 order placement (Module 2, Section 6).
@@ -54,8 +55,16 @@ export async function POST(req: Request) {
   if (contactPhoneSecondary.replace(/\D/g, '').length < 7) {
     return NextResponse.json({ error: 'Enter a second phone number — we need it to reach you about delivery.' }, { status: 400 });
   }
-  if (body.designConfirmed !== 'true' && !isQuote) {
-    return NextResponse.json({ error: 'Please confirm your artwork is final and ready to print.' }, { status: 400 });
+  // Module 2 §6.2: two separate confirmations, not one. They assert different things, and a
+  // customer who has genuinely checked their spelling has not necessarily checked colour mode.
+  if (!isQuote && body.designAccurate !== 'true') {
+    return NextResponse.json({ error: 'Confirm your design is accurate before continuing.' }, { status: 400 });
+  }
+  if (!isQuote && body.designCmyk !== 'true') {
+    return NextResponse.json({ error: 'Confirm your file is CMYK and good resolution.' }, { status: 400 });
+  }
+  if (body.addressConfirmed !== 'true') {
+    return NextResponse.json({ error: 'Confirm your delivery address is correct.' }, { status: 400 });
   }
   if (body.legalAccepted !== 'true') {
     return NextResponse.json({ error: 'Please accept the Terms and policies to continue.' }, { status: 400 });
@@ -96,6 +105,10 @@ export async function POST(req: Request) {
     legalVersionAccepted: LEGAL_VERSION,
   };
 
+  // Module 3 §2: the customer's own choice at upload. Free at launch, but the fee is recorded
+  // on the order so switching the paid tier on is a settings change, not a flow change.
+  const wantsPreflight = body.preflight === '1' && Boolean(body.file);
+
   /* ---------------------------------------------------------------- quote */
   if (isQuote || !price.ok) {
     const code = orderCode();
@@ -112,6 +125,9 @@ export async function POST(req: Request) {
       platformFeeKobo: 0,
       amountPaidKobo: 0,
       legalAcceptedAt: new Date(),
+      // A quote has no price yet, so there is nothing to print and nothing to preflight until
+      // it is accepted and paid.
+      preflightRequested: wantsPreflight,
     });
     return NextResponse.json({ ok: true, quote: true, code });
   }
@@ -130,6 +146,10 @@ export async function POST(req: Request) {
     marginType: 'fixed', marginFixedKobo: 0, marginPercentBps: 0,
   });
   const totals = computeOrderTotals(price.totalKobo, qty, margin, platformFeeKobo);
+  // The preflight fee rides on the same charge rather than a second transaction. Zero at
+  // launch, so this adds nothing today and needs no flow change when it is switched on.
+  const preflightFee = wantsPreflight ? PREFLIGHT_FEE_KOBO : 0;
+  totals.amountPaidKobo += preflightFee;
 
   const reference = orderCode();
   const metadata: PendingOrderMetadata = {
@@ -150,6 +170,8 @@ export async function POST(req: Request) {
     designFileName: body.fileName || null,
     printNote: spec.printNote,
     legalVersionAccepted: LEGAL_VERSION,
+    preflightRequested: wantsPreflight,
+    preflightFeeKobo: wantsPreflight ? PREFLIGHT_FEE_KOBO : 0,
   };
 
   const origin = process.env.NEXT_PUBLIC_APP_URL ?? new URL(req.url).origin;

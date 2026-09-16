@@ -26,6 +26,8 @@ import {
   computeListingPrice, fromPriceKobo, needsCustomQuantity, validateTiers, sortTiers,
 } from '../src/lib/listing-pricing';
 import { haversineKm, sortByDistance, type PrinterCard } from '../src/lib/discovery';
+import { CHECKLIST, FAILURE_COPY, runAutomatedChecks, visibleToPrinter } from '../src/lib/preflight';
+import { PREFLIGHT_FEE_KOBO } from '../src/lib/preflight-fee';
 import {
   DESIGN_MARGIN_KOBO, computeDesignTotals, freeRevisionsLeft,
   canRequestRevision, needsPaidRevision, canApprove,
@@ -690,6 +692,30 @@ console.log('\nQuote pricing (Module 2 §7)');
   // A percentage margin is taken against the quoted price, not an invented base.
   eq('percent margin applies to the quote',
     computeMargin(N(10000), 1, { marginType: 'percent', marginFixedKobo: 0, marginPercentBps: 700 }), N(700));
+
+console.log('\nPreflight (Module 3)');
+  // The single most important rule in this module: a paused order is invisible to the printer.
+  eq('a paused order is hidden from the printer', visibleToPrinter({ status: 'paused' }), false);
+  eq('a released order is visible', visibleToPrinter({ status: 'order_received' }), true);
+  // Pinning the queue list itself — adding 'paused' here would silently break the rule.
+  eq('paused is not a queue status', QUEUE_STATUSES.includes('paused' as never), false);
+  eq('the queue starts at order_received', QUEUE_STATUSES[0], 'order_received');
+
+  eq('the V1 checklist has five checks', CHECKLIST.length, 5);
+  eq('checks are the five specified',
+    CHECKLIST.map((c) => c.key),
+    ['resolution', 'colour_mode', 'dimensions', 'file_format', 'readiness']);
+  // Every check needs customer-facing wording, or a failure arrives with nothing to act on.
+  eq('every check has plain-language failure copy',
+    CHECKLIST.every((c) => (FAILURE_COPY[c.key] ?? '').length > 20), true);
+
+  // §8.3: the automated module is a real step that declines to decide in V1, not a stub that
+  // callers skip. When tooling lands it returns a decision and nothing else changes.
+  const auto = await runAutomatedChecks({ fileUrl: 'https://res.cloudinary.com/x.pdf', fileName: 'x.pdf' });
+  eq('V1 automation defers to a human', auto.decided, false);
+
+  // §7: free at launch, but the hook exists so switching it on is a one-line change.
+  eq('preflight is free at launch', PREFLIGHT_FEE_KOBO, 0);
 
   console.log(`\n${pass} passed, ${fail} failed\n`);
   process.exit(fail === 0 ? 0 : 1);

@@ -32,6 +32,11 @@ export const marginType = pgEnum('margin_type', ['fixed', 'percent']);
 // 'ready_for_dispatch' = completed & available for handover, for BOTH delivery and Collection.
 // Collection orders skip 'out_for_delivery' and go straight to 'delivered' on confirmed handover.
 export const orderStatus = pgEnum('order_status', [
+  /**
+   * Module 3. The order is paid but held for file review and is COMPLETELY invisible to the
+   * printer. It leaves this state only on a preflight pass or a customer override.
+   */
+  'paused',
   'order_received',
   'printer_assigned',
   'printing_in_progress',
@@ -405,6 +410,39 @@ export const designRevisionCharges = pgTable('design_revision_charges', {
 ]);
 
 /* ------------------------------------------------------------------ */
+/* Preflight (Module 3)                                                */
+/* ------------------------------------------------------------------ */
+
+export const preflightStatus = pgEnum('preflight_status', ['pending', 'passed', 'failed']);
+
+/**
+ * One review round. A resubmission creates a NEW row rather than overwriting, so the history
+ * of what was checked and what was found survives into any later dispute.
+ */
+export const preflightReviews = pgTable('preflight_reviews', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orderId: uuid('order_id').notNull().references(() => orders.id, { onDelete: 'cascade' }),
+  round: integer('round').notNull(),
+  fileUrl: text('file_url').notNull(),
+  fileName: text('file_name'),
+  status: preflightStatus('status').notNull().default('pending'),
+  /**
+   * Findings, one per failed check. Written by the automated module where it can decide, and
+   * by the human reviewer otherwise — the shape is the same either way, which is what lets
+   * automation be added later without touching this table (§8.3).
+   */
+  findings: jsonb('findings').$type<{ check: string; note: string }[]>().notNull().default([]),
+  /** 'auto' once the automated module can clear a file on its own; 'human' in V1. */
+  decidedBy: text('decided_by'),
+  reviewerNote: text('reviewer_note'),
+  submittedAt: timestamp('submitted_at', { withTimezone: true }).notNull().defaultNow(),
+  decidedAt: timestamp('decided_at', { withTimezone: true }),
+}, (t) => [
+  uniqueIndex('preflight_round_uq').on(t.orderId, t.round),
+  index('preflight_status_idx').on(t.status, t.submittedAt),
+]);
+
+/* ------------------------------------------------------------------ */
 /* FAQ (admin-managed)                                                 */
 /* ------------------------------------------------------------------ */
 
@@ -576,6 +614,17 @@ export const orders = pgTable('orders', {
   quotedAt: timestamp('quoted_at', { withTimezone: true }),
   quoteNote: text('quote_note'),
   quoteDeclinedAt: timestamp('quote_declined_at', { withTimezone: true }),
+
+  /**
+   * Preflight (Module 3). The override flag is permanent by design: if the customer later
+   * raises a quality complaint, it is the evidence that they were warned and accepted
+   * responsibility (§6.4). It is never cleared, even by a later passing resubmission.
+   */
+  preflightRequested: boolean('preflight_requested').notNull().default(false),
+  preflightOverriddenAt: timestamp('preflight_overridden_at', { withTimezone: true }),
+  // Charged at order placement when the paid tier is switched on. Zero at launch, but the
+  // column exists now so turning it on is a settings change rather than a flow change (§7).
+  preflightFeeKobo: integer('preflight_fee_kobo').notNull().default(0),
   spec: jsonb('spec').$type<OrderSpec>().notNull(),
   isQuote: boolean('is_quote').notNull().default(false),
 

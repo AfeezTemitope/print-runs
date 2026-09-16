@@ -37,6 +37,9 @@ export function stepsFor(method: FulfillmentMethod): OrderStatus[] {
 }
 
 const LABELS: Record<OrderStatus, string> = {
+  // Module 3: what the CUSTOMER sees while their file is being reviewed. The printer never
+  // sees this order at all, so there is no printer-facing wording to reconcile.
+  paused: 'Pending file review',
   order_received: 'Order received',
   printer_assigned: 'Printer assigned',
   printing_in_progress: 'Printing',
@@ -60,7 +63,13 @@ export function isTerminal(status: OrderStatus): boolean {
   return status === 'delivered' || status === 'cancelled';
 }
 
-/** Statuses that appear in a printer's live job queue. */
+/**
+ * Statuses that appear in a printer's live job queue.
+ *
+ * 'paused' is deliberately absent and must stay that way: an order awaiting preflight is
+ * COMPLETELY invisible to the printer until it passes or the customer overrides (Module 3
+ * §3.2). There is a test pinning this, because adding it here would silently break the rule.
+ */
 export const QUEUE_STATUSES: OrderStatus[] = [
   'order_received',
   'printer_assigned',

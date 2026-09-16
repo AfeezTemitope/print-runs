@@ -6,6 +6,8 @@ import { getSession } from '@/lib/auth';
 import { getCategory } from '@/lib/categories';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { QuoteActions } from './quote/QuoteActions';
+import { PreflightPanel } from './preflight/PreflightPanel';
+import { latestReview } from '@/lib/preflight';
 import { ButtonLink } from '@/components/ui/Button';
 import { naira, shortDate } from '@/lib/format';
 import { statusLabel } from '@/lib/status';
@@ -67,6 +69,14 @@ export default async function OrdersPage() {
       .orderBy(desc(tables.designOrders.createdAt)),
   ]);
 
+  // Paused orders need their latest review to render the right panel; fetched once here
+  // rather than per row.
+  const paused = rows.filter((r) => r.order.status === 'paused');
+  const reviews = new Map(
+    (await Promise.all(paused.map(async (r) => [r.order.id, await latestReview(r.order.id)] as const)))
+      .filter((e): e is [string, NonNullable<Awaited<ReturnType<typeof latestReview>>>] => Boolean(e[1])),
+  );
+
   // Print and design jobs interleave by date. A customer thinks in terms of "things I ordered",
   // not in terms of which table they landed in.
   type Row =
@@ -120,6 +130,27 @@ export default async function OrdersPage() {
               );
             }
             const { order, shopName } = row;
+            // A paused order is waiting on us, not on the printer — it needs the file-review
+            // panel rather than a status row the customer can do nothing with.
+            const review = reviews.get(order.id);
+            if (order.status === 'paused' && review) {
+              return (
+                <li key={order.id} className="px-5 py-4">
+                  <p className="font-display font-extrabold text-navy">
+                    {order.spec?.listingName ?? 'Your order'}
+                    <span className="ml-2 font-mono text-xs font-bold text-black/45">{order.code}</span>
+                  </p>
+                  <p className="mt-0.5 text-[13px] text-black/50">{shopName} · {shortDate(order.createdAt)}</p>
+                  <PreflightPanel state={{
+                    orderId: order.id,
+                    reviewStatus: review.status === 'failed' ? 'failed' : 'pending',
+                    issues: (review.findings ?? []).map((f) => f.note),
+                    reviewerNote: review.reviewerNote,
+                    round: review.round,
+                  }} />
+                </li>
+              );
+            }
             // A quote the printer has answered needs a decision from the customer, so it gets
             // its own block rather than being another row in a list they might scroll past.
             if (order.quotedPriceKobo && order.paymentStatus !== 'paid' && order.status !== 'cancelled') {

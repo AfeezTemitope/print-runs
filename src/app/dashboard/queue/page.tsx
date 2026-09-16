@@ -73,6 +73,15 @@ export default async function QueuePage() {
                 </div>
               </div>
               <div className="mt-4 border-t border-dashed border-black/25 pt-4">
+                {/*
+                  Module 3 §6.4: permanent, visible to printer and admin. It is the evidence
+                  that the customer was warned, if a quality complaint follows.
+                */}
+                {job.preflightOverriddenAt && (
+                  <p className="mb-2 rounded-xl border border-red/30 bg-red/5 px-3.5 py-2 text-[13px] font-semibold text-red">
+                    ⚠ Customer overrode preflight check — file may have issues.
+                  </p>
+                )}
                 <QueueActions
                   orderId={job.id}
                   status={job.status}

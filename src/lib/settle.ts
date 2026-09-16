@@ -35,6 +35,9 @@ export type PendingOrderMetadata = {
   designFileUrl: string | null;
   designFileName: string | null;
   printNote: string | null;
+  /** Module 3: the customer asked for a file check, so the order is created paused. */
+  preflightRequested?: boolean;
+  preflightFeeKobo?: number;
 };
 
 function isPendingOrderMetadata(m: unknown): m is PendingOrderMetadata {
@@ -160,7 +163,14 @@ async function settlePrintOrder(reference: string): Promise<{ ok: true } | { ok:
     // answered with the exact document version the customer agreed to.
     legalVersionAccepted: meta.legalVersionAccepted ?? null,
     legalAcceptedAt: meta.legalVersionAccepted ? new Date() : null,
-    status: 'order_received',
+    /**
+     * Module 3 §3.2. A preflight order is created PAUSED, so it never appears in the printer's
+     * queue even momentarily. Setting it here rather than updating after insert means there is
+     * no window in which the printer could see a file that has not been checked.
+     */
+    preflightRequested: Boolean(meta.preflightRequested),
+    preflightFeeKobo: meta.preflightFeeKobo ?? 0,
+    status: meta.preflightRequested ? ('paused' as const) : ('order_received' as const),
     paymentStatus: 'paid',
     settlementStatus: 'pending',
     designFileUrl: meta.designFileUrl,
@@ -181,6 +191,13 @@ async function settlePrintOrder(reference: string): Promise<{ ok: true } | { ok:
     paidAt: data.paid_at ? new Date(data.paid_at) : new Date(),
     raw: data as unknown as Record<string, unknown>,
   }).onConflictDoNothing();
+
+  // A paused order needs its first review round opened the moment payment lands, or the file
+  // sits in limbo with the customer told it is being checked and nothing in the admin queue.
+  if (order && meta.preflightRequested && meta.designFileUrl) {
+    const { submitForReview } = await import('@/lib/preflight');
+    await submitForReview(order.id, meta.designFileUrl, meta.designFileName);
+  }
 
   // Only the call that actually inserted the order sends mail, so a retried webhook and a
   // returning browser tab cannot both send a receipt. Awaited but never allowed to throw:
@@ -228,6 +245,9 @@ export type PendingDesignMetadata = {
   revisionsIncluded: number;
   extraRevisionKobo: number;
   legalVersionAccepted?: string;
+  /** Module 3: the customer asked for a file check, so the order is created paused. */
+  preflightRequested?: boolean;
+  preflightFeeKobo?: number;
 };
 
 function isPendingDesignMetadata(m: unknown): m is PendingDesignMetadata {

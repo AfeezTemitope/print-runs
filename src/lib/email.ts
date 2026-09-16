@@ -224,3 +224,31 @@ export function quoteReady(
     cta: { label: 'Review your quote', url: `${site()}/orders` },
   });
 }
+
+export function preflightPassed(to: string, o: { code: string; printer: string }) {
+  return sendEmail({
+    to,
+    subject: `File check passed — ${o.code}`,
+    heading: 'Your file passed our print check',
+    body: [
+      `Good news — your file is print-ready, and order <strong>${o.code}</strong> has been sent to <strong>${o.printer}</strong>.`,
+      `They'll start work shortly. You'll hear from us again when it's ready.`,
+    ],
+    cta: { label: 'Track your order', url: `${site()}/orders` },
+  });
+}
+
+export function preflightFailed(to: string, o: { code: string; issues: string[]; note: string }) {
+  return sendEmail({
+    to,
+    subject: `Your file needs a fix — ${o.code}`,
+    heading: 'We found a problem with your file',
+    body: [
+      `We checked the file on order <strong>${o.code}</strong> before sending it to your printer, and it isn't quite print-ready:`,
+      ...o.issues.map((i) => `• ${i}`),
+      ...(o.note ? [o.note] : []),
+      `Nothing has been printed yet. You can upload a corrected file — we'll check it again free — or send this one anyway if you're happy to.`,
+    ],
+    cta: { label: 'Fix or send anyway', url: `${site()}/orders` },
+  });
+}
