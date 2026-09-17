@@ -14,7 +14,7 @@ export function PhotoUpload({
 }: {
   url?: string;
   onChange: (url: string | undefined) => void;
-  kind: 'catalog' | 'products';
+  kind: 'catalog' | 'products' | 'permit';
   label: string;
   aspect?: string;
 }) {
@@ -48,7 +48,7 @@ export function PhotoUpload({
         ref={input}
         type="file"
         hidden
-        accept="image/png,image/jpeg,image/webp"
+        accept={kind === 'permit' ? '.pdf,image/png,image/jpeg' : 'image/png,image/jpeg,image/webp'}
         onChange={(e) => send(e.target.files?.[0])}
       />
       {url ? (

@@ -12,7 +12,7 @@ const LINKS = [
   { href: '/dashboard/listings', label: 'Products', icon: Package },
   { href: '/dashboard/quotes', label: 'Quotes', icon: MessageSquare },
   { href: '/dashboard/storefront', label: 'Storefront', icon: Store },
-  { href: '/dashboard/verification', label: 'Verification', icon: BadgeCheck },
+  { href: '/dashboard/verify', label: 'Get Verified', icon: BadgeCheck },
   { href: '/dashboard/orders', label: 'Orders', icon: ReceiptText },
   { href: '/dashboard/earnings', label: 'Earnings', icon: Wallet },
   { href: '/dashboard/reviews', label: 'Reviews', icon: Star },

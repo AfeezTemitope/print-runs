@@ -410,6 +410,62 @@ export const designRevisionCharges = pgTable('design_revision_charges', {
 ]);
 
 /* ------------------------------------------------------------------ */
+/* Trust, verification and disputes (Module 4)                         */
+/* ------------------------------------------------------------------ */
+
+/** A Tier 2 upgrade submission. Tier 1 needs no row — it is auto-approved at signup. */
+export const verificationSubmissions = pgTable('verification_submissions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  shopId: uuid('shop_id').notNull().references(() => shops.id, { onDelete: 'cascade' }),
+  documentUrl: text('document_url').notNull(),
+  documentType: text('document_type').notNull(), // CAC certificate, ID, work permit
+  socialUrl: text('social_url'),
+  status: verificationStatus('status').notNull().default('pending'),
+  /** Required on rejection — a printer cannot fix what they were not told (§1.2). */
+  reviewNote: text('review_note'),
+  submittedAt: timestamp('submitted_at', { withTimezone: true }).notNull().defaultNow(),
+  reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+}, (t) => [
+  index('verification_status_idx').on(t.status, t.submittedAt),
+  index('verification_shop_idx').on(t.shopId),
+]);
+
+export const disputeReason = pgEnum('dispute_reason', [
+  'not_delivered', 'wrong_product', 'quality', 'damaged', 'other',
+]);
+export const disputeState = pgEnum('dispute_state', [
+  'open', 'printer_responded', 'resolved_customer', 'resolved_printer',
+]);
+
+/**
+ * A dispute freezes settlement until an admin decides (§4.2). It lives in its own table
+ * rather than as order columns because the printer's response, the evidence from both sides
+ * and the decision are all separate events with their own timestamps — and that timeline is
+ * the evidence an admin actually rules on.
+ */
+export const disputes = pgTable('disputes', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  orderId: uuid('order_id').notNull().references(() => orders.id, { onDelete: 'cascade' }),
+  shopId: uuid('shop_id').notNull().references(() => shops.id, { onDelete: 'cascade' }),
+  customerId: uuid('customer_id').notNull().references(() => users.id),
+  reason: disputeReason('reason').notNull(),
+  detail: text('detail'),
+  evidenceUrls: jsonb('evidence_urls').$type<string[]>().notNull().default([]),
+  state: disputeState('state').notNull().default('open'),
+  printerResponse: text('printer_response'),
+  printerRespondedAt: timestamp('printer_responded_at', { withTimezone: true }),
+  /** reprint | refund | none — what the admin actually did about it. */
+  outcome: text('outcome'),
+  decisionNote: text('decision_note'),
+  decidedAt: timestamp('decided_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex('dispute_order_uq').on(t.orderId),
+  index('dispute_state_idx').on(t.state, t.createdAt),
+  index('dispute_shop_idx').on(t.shopId, t.decidedAt),
+]);
+
+/* ------------------------------------------------------------------ */
 /* Preflight (Module 3)                                                */
 /* ------------------------------------------------------------------ */
 
@@ -625,6 +681,8 @@ export const orders = pgTable('orders', {
   // Charged at order placement when the paid tier is switched on. Zero at launch, but the
   // column exists now so turning it on is a settings change rather than a flow change (§7).
   preflightFeeKobo: integer('preflight_fee_kobo').notNull().default(0),
+  /** Module 4: set when a dispute is open, so settlement logic has one thing to check. */
+  disputedAt: timestamp('disputed_at', { withTimezone: true }),
   spec: jsonb('spec').$type<OrderSpec>().notNull(),
   isQuote: boolean('is_quote').notNull().default(false),
 
@@ -677,6 +735,11 @@ export const orders = pgTable('orders', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   readyAt: timestamp('ready_at', { withTimezone: true }),
   handoverAt: timestamp('handover_at', { withTimezone: true }),
+  /**
+   * Module 4: the 48-hour dispute window and the 7-day review window are both measured from
+   * here, so it must be the moment delivery was confirmed rather than any later edit.
+   */
+  deliveredAt: timestamp('delivered_at', { withTimezone: true }),
 }, (t) => [
   uniqueIndex('orders_code_uq').on(t.code),
   index('orders_shop_status_idx').on(t.shopId, t.status),
@@ -733,6 +796,16 @@ export const reviews = pgTable('reviews', {
   customerId: uuid('customer_id').notNull().references(() => users.id),
   rating: integer('rating').notNull(),
   comment: text('comment'),
+  /**
+   * Module 4 §3.3/§3.4: reviews are public and permanent — the printer can neither edit nor
+   * delete one. They may FLAG a review for admin attention, which escalates it without
+   * hiding it; only an admin can remove one, and only for abuse, personal information or
+   * demonstrable fakery.
+   */
+  flaggedAt: timestamp('flagged_at', { withTimezone: true }),
+  flagReason: text('flag_reason'),
+  removedAt: timestamp('removed_at', { withTimezone: true }),
+  removedReason: text('removed_reason'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [
   uniqueIndex('reviews_order_uq').on(t.orderId),

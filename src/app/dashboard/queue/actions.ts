@@ -145,7 +145,9 @@ export async function confirmHandover(orderId: string) {
   }
 
   await db().update(tables.orders)
-    .set({ status: 'delivered', handoverAt: new Date(), updatedAt: new Date() })
+    // deliveredAt starts BOTH the 48-hour dispute window and the 7-day review window, so it
+    // is stamped at the same instant the status changes (Module 4 §3.1, §4.1).
+    .set({ status: 'delivered', handoverAt: new Date(), deliveredAt: new Date(), updatedAt: new Date() })
     .where(eq(tables.orders.id, orderId));
 
   revalidatePath('/dashboard/queue');

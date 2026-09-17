@@ -7,6 +7,7 @@ import { getCategory } from '@/lib/categories';
 import { naira, shortDate } from '@/lib/format';
 import { ButtonLink } from '@/components/ui/Button';
 import { QUEUE_STATUSES, statusLabel } from '@/lib/status';
+import { latestVerification, shouldNudgeTier2 } from '@/lib/trust';
 
 export const metadata: Metadata = { title: 'Dashboard' };
 
@@ -43,9 +44,29 @@ export default async function DashboardPage() {
     { label: 'Active listings', value: String(listings[0].c) },
   ];
 
+  // §1.4: nudge toward Tier 2 without making it mandatory — persistent but not intrusive,
+  // and only once they have been live long enough to have something to verify.
+  const verification = await latestVerification(shop.id);
+  const nudge = shouldNudgeTier2(shop, verification?.status === 'pending');
+
   return (
     <div>
       <h1 className="font-display text-3xl font-extrabold tracking-tight text-black">Overview</h1>
+
+      {nudge && (
+        <Link href="/dashboard/verify"
+          className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-blue/30 bg-blue/5 px-5 py-4 transition-colors hover:border-blue">
+          <div>
+            <p className="font-display text-[15px] font-extrabold text-navy">
+              Get Verified — earn more customer trust
+            </p>
+            <p className="mt-0.5 text-[13px] text-black/60">
+              Verified printers stand out in search. Takes a couple of minutes.
+            </p>
+          </div>
+          <span className="font-display text-[13px] font-bold text-blue">Start →</span>
+        </Link>
+      )}
 
       <dl className="mt-6 grid grid-cols-2 gap-3.5 lg:grid-cols-4">
         {stats.map((s) => (

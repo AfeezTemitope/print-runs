@@ -27,6 +27,10 @@ import {
 } from '../src/lib/listing-pricing';
 import { haversineKm, sortByDistance, type PrinterCard } from '../src/lib/discovery';
 import { CHECKLIST, FAILURE_COPY, runAutomatedChecks, visibleToPrinter } from '../src/lib/preflight';
+import {
+  canRaiseDispute, canReview, disputeHoursLeft, settlementEligible,
+  standingFor, visibilityPenalty, ratingNeedsReview,
+} from '../src/lib/trust';
 import { PREFLIGHT_FEE_KOBO } from '../src/lib/preflight-fee';
 import {
   DESIGN_MARGIN_KOBO, computeDesignTotals, freeRevisionsLeft,
@@ -653,7 +657,7 @@ console.log('\nDiscovery sorting (Module 2)');
   const card = (over: Partial<PrinterCard>): PrinterCard => ({
     id: 'x', slug: 'x', code: 'LB-001', businessName: 'X', bannerUrl: null, logoUrl: null,
     area: 'Lagos', verified: false, ratingAvg: 0, ratingCount: 0, categories: [],
-    fromKobo: null, distanceKm: null, ...over,
+    fromKobo: null, distanceKm: null, penalty: 0, ...over,
   });
 
   // Lagos check: Yaba to Lekki is roughly 15km straight line.
@@ -716,6 +720,54 @@ console.log('\nPreflight (Module 3)');
 
   // §7: free at launch, but the hook exists so switching it on is a one-line change.
   eq('preflight is free at launch', PREFLIGHT_FEE_KOBO, 0);
+
+console.log('\nTrust and reputation (Module 4)');
+  // §4.1: 48 hours from DELIVERY, not from whenever someone happens to look.
+  const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000);
+  const delivered = (h: number) => ({ status: 'delivered', deliveredAt: hoursAgo(h), disputedAt: null });
+  eq('a dispute can be raised inside 48h', canRaiseDispute(delivered(10)), true);
+  eq('at 47h it is still open', canRaiseDispute(delivered(47)), true);
+  eq('past 48h the window is closed', canRaiseDispute(delivered(49)), false);
+  eq('an undelivered order cannot be disputed',
+    canRaiseDispute({ status: 'out_for_delivery', deliveredAt: null, disputedAt: null }), false);
+  eq('you cannot dispute twice',
+    canRaiseDispute({ ...delivered(5), disputedAt: new Date() }), false);
+  eq('hours left counts down', disputeHoursLeft(hoursAgo(40)) <= 8, true);
+
+  // §3.1: reviews stay open far longer than disputes.
+  eq('a review is allowed on day 5', canReview(delivered(5 * 24), false), true);
+  eq('the review window closes after 7 days', canReview(delivered(8 * 24), false), false);
+  eq('you cannot review twice', canReview(delivered(1), true), false);
+
+  // §2.1: paying out at delivery would make the 48-hour window meaningless.
+  const settleable = (over = {}) => ({ ...delivered(50), settlementStatus: 'pending', ...over });
+  eq('settlement waits for the window to close', settlementEligible(settleable()), true);
+  eq('settlement is held inside the window', settlementEligible({ ...settleable(), ...delivered(2) }), false);
+  eq('an open dispute freezes settlement',
+    settlementEligible({ ...settleable(), disputedAt: new Date() }), false);
+  eq('an already-settled order is not settled again',
+    settlementEligible({ ...settleable(), settlementStatus: 'settled' }), false);
+
+  // §5.1: the ladder is data an admin acts on, not something a counter does by itself.
+  eq('no losses is clear', standingFor(0).level, 'clear');
+  eq('one loss is noted only', standingFor(1).level, 'noted');
+  eq('two losses is a formal warning', standingFor(2).level, 'warned');
+  eq('three losses goes to manual review', standingFor(3).level, 'suspend_review');
+  // §5.2: silent demotion starts at two, never at one.
+  eq('one loss does not demote', visibilityPenalty(1), 0);
+  eq('two losses demote', visibilityPenalty(2), 1);
+
+  // §5.1: a low rating only means something once there is enough of it.
+  eq('a low rating with few reviews does not flag', ratingNeedsReview(2.0, 3), false);
+  eq('a low rating with 10+ reviews flags', ratingNeedsReview(2.9, 12), true);
+  eq('a good rating never flags', ratingNeedsReview(4.5, 50), false);
+
+  // Demoted printers sort below everyone, however close they are.
+  const ranked = sortByDistance([
+    card({ id: 'near-demoted', distanceKm: 1, penalty: 1 }),
+    card({ id: 'far-clean', distanceKm: 20, penalty: 0 }),
+  ]);
+  eq('a demoted printer sorts below a distant clean one', ranked[0].id, 'far-clean');
 
   console.log(`\n${pass} passed, ${fail} failed\n`);
   process.exit(fail === 0 ? 0 : 1);

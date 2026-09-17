@@ -1,7 +1,8 @@
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, gte, inArray } from 'drizzle-orm';
 import { db, tables } from '@/db';
 import { fromPriceKobo } from '@/lib/listing-pricing';
 import { getCategory } from '@/lib/catalog';
+import { visibilityPenalty } from '@/lib/trust';
 
 /**
  * Customer-facing printer discovery (Module 2, Sections 3 and 4).
@@ -25,6 +26,12 @@ export type PrinterCard = {
   categories: string[];
   fromKobo: number | null;
   distanceKm: number | null;
+  /**
+   * Module 4 §5.2: a silent ranking demotion for printers who have lost 2+ disputes in the
+   * last 90 days. Never surfaced as a label — the printer is not told, and the customer just
+   * sees better-performing printers first.
+   */
+  penalty: number;
 };
 
 /** Straight-line distance. Good enough to order a list by; not a routing estimate. */
@@ -45,6 +52,8 @@ export function haversineKm(a: { lat: number; lng: number }, b: { lat: number; l
  */
 export function sortByDistance(cards: PrinterCard[]): PrinterCard[] {
   return [...cards].sort((a, b) => {
+    // Demoted printers sort below everyone else regardless of how close they are.
+    if (a.penalty !== b.penalty) return a.penalty - b.penalty;
     if (a.distanceKm === null && b.distanceKm === null) return b.ratingAvg - a.ratingAvg;
     if (a.distanceKm === null) return 1;
     if (b.distanceKm === null) return -1;
@@ -78,6 +87,16 @@ export async function findPrinters(opts: DiscoveryOptions = {}): Promise<Printer
   for (const t of tierRows) {
     tiersByListing.set(t.listingId, [...(tiersByListing.get(t.listingId) ?? []), t]);
   }
+
+  // One query for every shop's recent lost disputes, rather than one per card.
+  const since = new Date(Date.now() - 90 * 86_400_000);
+  const lostRows = await db().select({ shopId: tables.disputes.shopId }).from(tables.disputes)
+    .where(and(
+      eq(tables.disputes.state, 'resolved_customer'),
+      gte(tables.disputes.decidedAt, since),
+    ));
+  const lostByShop = new Map<string, number>();
+  for (const r of lostRows) lostByShop.set(r.shopId, (lostByShop.get(r.shopId) ?? 0) + 1);
 
   const term = opts.search?.trim().toLowerCase();
 
@@ -116,6 +135,7 @@ export async function findPrinters(opts: DiscoveryOptions = {}): Promise<Printer
         .filter((n): n is string => Boolean(n))
         .slice(0, 3),
       fromKobo: prices.length ? Math.min(...prices) : null,
+      penalty: visibilityPenalty(lostByShop.get(shop.id) ?? 0),
       distanceKm: opts.origin && shop.lat != null && shop.lng != null
         ? haversineKm(opts.origin, { lat: shop.lat, lng: shop.lng })
         : null,

@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { desc, eq } from 'drizzle-orm';
+import { desc, eq, inArray } from 'drizzle-orm';
 import { db, tables } from '@/db';
 import { getSession } from '@/lib/auth';
 import { getCategory } from '@/lib/categories';
@@ -8,6 +8,8 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { QuoteActions } from './quote/QuoteActions';
 import { PreflightPanel } from './preflight/PreflightPanel';
 import { latestReview } from '@/lib/preflight';
+import { TrustPanel } from './trust/TrustPanel';
+import { canRaiseDispute, canReview, disputeHoursLeft } from '@/lib/trust';
 import { ButtonLink } from '@/components/ui/Button';
 import { naira, shortDate } from '@/lib/format';
 import { statusLabel } from '@/lib/status';
@@ -75,6 +77,15 @@ export default async function OrdersPage() {
   const reviews = new Map(
     (await Promise.all(paused.map(async (r) => [r.order.id, await latestReview(r.order.id)] as const)))
       .filter((e): e is [string, NonNullable<Awaited<ReturnType<typeof latestReview>>>] => Boolean(e[1])),
+  );
+
+  // Which delivered orders already have a review, so the panel does not offer a second one.
+  const deliveredIds = rows.filter((r) => r.order.status === 'delivered').map((r) => r.order.id);
+  const reviewed = new Set(
+    deliveredIds.length
+      ? (await db().select({ orderId: tables.reviews.orderId }).from(tables.reviews)
+          .where(inArray(tables.reviews.orderId, deliveredIds))).map((r) => r.orderId)
+      : [],
   );
 
   // Print and design jobs interleave by date. A customer thinks in terms of "things I ordered",
@@ -167,6 +178,29 @@ export default async function OrdersPage() {
                     note={order.quoteNote}
                     printer={shopName}
                   />
+                </li>
+              );
+            }
+            if (order.status === 'delivered') {
+              const alreadyReviewed = reviewed.has(order.id);
+              return (
+                <li key={order.id} className="px-5 py-4">
+                  <p className="font-display font-extrabold text-navy">
+                    {order.spec?.listingName ?? 'Your order'}
+                    <span className="ml-2 font-mono text-xs font-bold text-black/45">{order.code}</span>
+                  </p>
+                  <p className="mt-0.5 text-[13px] text-black/50">
+                    {shopName} · delivered {order.deliveredAt ? shortDate(order.deliveredAt) : ''}
+                  </p>
+                  <TrustPanel state={{
+                    orderId: order.id,
+                    printerName: shopName,
+                    canReview: canReview(order, alreadyReviewed),
+                    canDispute: canRaiseDispute(order),
+                    disputeHoursLeft: disputeHoursLeft(order.deliveredAt),
+                    disputeOpen: Boolean(order.disputedAt),
+                    reviewed: alreadyReviewed,
+                  }} />
                 </li>
               );
             }
