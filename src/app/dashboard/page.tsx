@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { and, count, desc, eq, gte, inArray, sum } from 'drizzle-orm';
 import { db, tables } from '@/db';
 import { getMyShop } from '@/lib/auth';
-import { getCategory } from '@/lib/categories';
+import { categoryName } from '@/lib/catalog';
 import { naira, shortDate } from '@/lib/format';
 import { ButtonLink } from '@/components/ui/Button';
 import { QUEUE_STATUSES, statusLabel } from '@/lib/status';
@@ -93,7 +93,7 @@ export default async function DashboardPage() {
             <li key={o.id} className="flex flex-wrap items-center justify-between gap-2 px-5 py-3.5">
               <div>
                 <p className="font-display text-sm font-extrabold text-navy">
-                  {getCategory(o.spec.category)?.name ?? o.spec.category}
+                  {categoryName(o.spec.category) ?? o.spec.category}
                   <span className="ml-2 font-mono text-xs font-bold text-black/40">{o.code}</span>
                 </p>
                 <p className="text-xs text-black/50">

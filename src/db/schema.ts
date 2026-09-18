@@ -140,18 +140,6 @@ export const shops = pgTable('shops', {
 /* Batch 1 — the verification queue UI itself is Batch 3.              */
 /* ------------------------------------------------------------------ */
 
-export const shopCategoryVerifications = pgTable('shop_category_verifications', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  shopId: uuid('shop_id').notNull().references(() => shops.id, { onDelete: 'cascade' }),
-  categorySlug: text('category_slug').notNull(),
-  status: verificationStatus('status').notNull().default('pending'),
-  workPermitUrl: text('work_permit_url'),
-  reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-}, (t) => [
-  uniqueIndex('shop_cat_verif_uq').on(t.shopId, t.categorySlug),
-  index('shop_cat_verif_status_idx').on(t.categorySlug, t.status),
-]);
 
 /* ------------------------------------------------------------------ */
 /* Platform-wide settings (decision 2: admin-editable, no code change). */
@@ -826,11 +814,7 @@ export const shopsRelations = relations(shops, ({ one, many }) => ({
   products: many(products),
   orders: many(orders),
   reviews: many(reviews),
-  categoryVerifications: many(shopCategoryVerifications),
-}));
-
-export const shopCategoryVerificationsRelations = relations(shopCategoryVerifications, ({ one }) => ({
-  shop: one(shops, { fields: [shopCategoryVerifications.shopId], references: [shops.id] }),
+  listings: many(listings),
 }));
 
 export const productsRelations = relations(products, ({ one, many }) => ({

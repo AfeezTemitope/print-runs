@@ -3,7 +3,7 @@ import { desc, eq } from 'drizzle-orm';
 import { db, tables } from '@/db';
 import { naira, shortDate } from '@/lib/format';
 import { statusLabel } from '@/lib/status';
-import { listingLabel } from '@/lib/categories';
+import { categoryName } from '@/lib/catalog';
 import { specSummary } from '@/lib/spec';
 import { CodeBadge } from '@/components/ui/CodeBadge';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -65,7 +65,7 @@ export default async function AdminOrdersPage() {
                     </span>
                   </div>
                   <p className="mt-1 font-display font-extrabold text-navy">
-                    {specSummary(order.spec, listingLabel(order.spec.category, order.spec.listing)).join(' · ')}
+                    {specSummary(order.spec).join(' · ')}
                   </p>
                   <p className="mt-0.5 text-xs text-black/55">
                     {shop?.businessName ?? 'Unassigned'} · {statusLabel(order.status, order.fulfillmentMethod)}

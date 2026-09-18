@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { desc, eq, inArray } from 'drizzle-orm';
 import { db, tables } from '@/db';
 import { getSession } from '@/lib/auth';
-import { getCategory } from '@/lib/categories';
+import { categoryName } from '@/lib/catalog';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { QuoteActions } from './quote/QuoteActions';
 import { PreflightPanel } from './preflight/PreflightPanel';
@@ -213,7 +213,7 @@ export default async function OrdersPage() {
                 <Link href={`/orders/${order.id}`} className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 transition-colors hover:bg-pale/20">
                   <div>
                     <p className="font-display font-extrabold text-navy">
-                      {getCategory(order.spec.category)?.name ?? order.spec.category}
+                      {categoryName(order.spec.category) ?? order.spec.category}
                       <span className="ml-2 font-mono text-xs font-bold text-black/45">{order.code}</span>
                     </p>
                     <p className="mt-0.5 text-[13px] text-black/50">{shopName} · {shortDate(order.createdAt)}</p>

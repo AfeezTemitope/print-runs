@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { and, desc, eq, sum, count } from 'drizzle-orm';
 import { db, tables } from '@/db';
 import { getMyShop } from '@/lib/auth';
-import { getCategory } from '@/lib/categories';
+import { categoryName } from '@/lib/catalog';
 import { naira, shortDate } from '@/lib/format';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { isSettlementEligible } from '@/lib/status';
@@ -88,7 +88,7 @@ export default async function EarningsPage() {
           {paid.map((o) => (
             <li key={o.id} className="flex items-center justify-between px-5 py-3">
               <span className="text-sm text-black/60">
-                <span className="font-mono font-bold text-navy">{o.code}</span> · {getCategory(o.spec.category)?.name} · {shortDate(o.createdAt)}
+                <span className="font-mono font-bold text-navy">{o.code}</span> · {categoryName(o.spec.category)} · {shortDate(o.createdAt)}
               </span>
               <span className="text-right">
                 <span className="block font-display text-sm font-extrabold text-success">+{naira(o.printerBaseKobo)}</span>

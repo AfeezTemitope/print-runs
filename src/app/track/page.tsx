@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { and, desc, eq, ne } from 'drizzle-orm';
 import { db, tables } from '@/db';
 import { getSession } from '@/lib/auth';
-import { getCategory } from '@/lib/categories';
+import { categoryName } from '@/lib/catalog';
 import { StatusTracker } from '@/components/ui/StatusTracker';
 import { CodeBadge } from '@/components/ui/CodeBadge';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -57,7 +57,7 @@ export default async function TrackPage() {
                   <CodeBadge code={shopCode} tone="light" />
                 </div>
                 <span className="text-[13px] text-black/50">
-                  {getCategory(order.spec.category)?.name} · {shopName} · {shortDate(order.createdAt)}
+                  {categoryName(order.spec.category)} · {shopName} · {shortDate(order.createdAt)}
                 </span>
               </div>
               {order.isQuote && order.paymentStatus === 'unpaid' ? (

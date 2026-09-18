@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation';
 import { and, eq } from 'drizzle-orm';
 import { db, tables } from '@/db';
 import { getSession } from '@/lib/auth';
-import { getCategory, listingLabel } from '@/lib/categories';
+import { categoryName } from '@/lib/catalog';
 import { specSummary } from '@/lib/spec';
 import { StatusTracker } from '@/components/ui/StatusTracker';
 import { CodeBadge } from '@/components/ui/CodeBadge';
@@ -30,12 +30,12 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
   const { order, shopName, shopCode } = row;
 
   const [existingReview] = await db().select().from(tables.reviews).where(eq(tables.reviews.orderId, order.id)).limit(1);
-  const cat = getCategory(order.spec.category);
+  const catName = categoryName(order.spec.category);
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-10 sm:px-6">
       <div className="flex flex-wrap items-center gap-2.5">
-        <h1 className="font-display text-3xl font-extrabold tracking-tight text-black">{cat?.name}</h1>
+        <h1 className="font-display text-3xl font-extrabold tracking-tight text-black">{catName}</h1>
         <span className="font-mono text-sm font-bold text-black/45">{order.code}</span>
       </div>
       <p className="mt-1.5 flex items-center gap-2 text-sm text-black/55">
@@ -55,7 +55,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
       <section className="mt-5 rounded-2xl border border-black/12 bg-white p-5 sm:p-6">
         <h2 className="font-display text-sm font-extrabold uppercase tracking-wide text-navy">Spec</h2>
         <dl className="mt-3 font-mono text-sm">
-          {specSummary(order.spec, listingLabel(order.spec.category, order.spec.listing)).map((line, i) => (
+          {specSummary(order.spec).map((line, i) => (
             <div key={i} className="border-b border-dashed border-black/15 py-2 text-navy">{line}</div>
           ))}
           {order.printNote && (

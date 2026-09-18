@@ -2,10 +2,9 @@ import { eq } from 'drizzle-orm';
 import { naira } from '@/lib/format';
 import { orderConfirmed, newJobForPrinter, designOrderConfirmed, newDesignBrief } from '@/lib/email';
 import { specSummary } from '@/lib/spec';
-import { listingLabel } from '@/lib/categories';
 import { db, tables } from '@/db';
 import { paystackVerify } from '@/lib/paystack';
-import { computePrice } from '@/lib/pricing';
+import { computeListingPrice } from '@/lib/listing-pricing';
 import type { OrderSpec } from '@/db/schema';
 
 /**
@@ -122,19 +121,27 @@ async function settlePrintOrder(reference: string): Promise<{ ok: true } | { ok:
     return { ok: false, message: 'Payment succeeded but order details were missing — contact support with your reference.' };
   }
 
-  const [product] = await db().select().from(tables.products).where(eq(tables.products.id, meta.productId)).limit(1);
-  if (!product) {
+  // V2: meta.productId carries the printer's LISTING id. The old products table is retired
+  // and empty, so looking there would fail every order after the storefront rebuild.
+  const [listing] = await db().select().from(tables.listings)
+    .where(eq(tables.listings.id, meta.productId)).limit(1);
+  if (!listing) {
     return { ok: false, message: 'That product is no longer available — contact support with your reference, you were charged.' };
   }
-  const [variants, addons] = await Promise.all([
-    db().select().from(tables.productVariants).where(eq(tables.productVariants.productId, product.id)),
-    db().select().from(tables.productAddons).where(eq(tables.productAddons.productId, product.id)),
-  ]);
 
-  // Recompute from the spec — the metadata's own kobo numbers are never trusted blindly.
-  // meta.spec is typed as the DB's OrderSpec (slightly looser types for JSON storage) but was
-  // built from a validated CustomerSpec in checkout/route.ts before being handed to Paystack.
-  const recomputed = computePrice(meta.spec as unknown as Parameters<typeof computePrice>[0], product, variants, addons);
+  const tiers = await db().select().from(tables.listingTiers)
+    .where(eq(tables.listingTiers.listingId, listing.id));
+
+  /**
+   * Recompute from the printer's live listing — the metadata's own kobo numbers are never
+   * trusted blindly. A quote has no computable price by definition, so it is exempt: the
+   * agreed figure is the one the printer sent and the customer accepted.
+   */
+  const recomputed = computeListingPrice(listing, tiers, {
+    qty: meta.spec.qty ?? 1,
+    width: meta.spec.width,
+    height: meta.spec.height,
+  });
   if (!recomputed.ok || recomputed.totalKobo !== meta.printerBaseKobo) {
     return { ok: false, message: 'Pricing changed after payment — contact support with your reference, you were charged.' };
   }
@@ -146,8 +153,9 @@ async function settlePrintOrder(reference: string): Promise<{ ok: true } | { ok:
     code: reference,
     customerId: meta.customerId,
     shopId: meta.shopId,
-    productId: meta.productId,
-    spec: { ...meta.spec, breakdown: recomputed.lines },
+    productId: null,
+    listingId: meta.productId,
+    spec: { ...meta.spec, breakdown: [{ label: recomputed.detail, amountKobo: recomputed.totalKobo }] },
     isQuote: false,
     printerBaseKobo: meta.printerBaseKobo,
     marginKobo: meta.marginKobo,
@@ -203,7 +211,7 @@ async function settlePrintOrder(reference: string): Promise<{ ok: true } | { ok:
   // returning browser tab cannot both send a receipt. Awaited but never allowed to throw:
   // the order is already recorded, and a failed email must not fail the payment.
   if (order) {
-    const summary = specSummary(finalOrder.spec, listingLabel(finalOrder.spec.category, finalOrder.spec.listing)).join(' · ');
+    const summary = specSummary(finalOrder.spec).join(' · ');
     const [shop] = await db().select().from(tables.shops).where(eq(tables.shops.id, finalOrder.shopId)).limit(1);
 
     if (finalOrder.contactEmail) {

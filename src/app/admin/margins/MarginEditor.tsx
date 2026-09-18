@@ -5,13 +5,11 @@ import { naira } from '@/lib/format';
 import { computeMargin } from '@/lib/pricing';
 import { Button } from '@/components/ui/Button';
 import { Input, Select } from '@/components/ui/Field';
-import { CodeBadge } from '@/components/ui/CodeBadge';
 import { saveCategoryMargin } from './actions';
 
 export type MarginRow = {
   categorySlug: string;
   name: string;
-  code: string;
   marginType: 'fixed' | 'percent';
   value: string;        // naira for fixed, percent for percent
   configured: boolean;  // false = still falling back to the product's own stored margin
@@ -45,7 +43,6 @@ function Row({ row }: { row: MarginRow }) {
             {row.configured ? 'configured' : 'using the default'}
           </p>
         </div>
-        <CodeBadge code={row.code} tone="light" />
       </div>
 
       <div className="mt-3 grid gap-2 sm:grid-cols-[130px_1fr_auto]">

@@ -4,15 +4,13 @@ import { revalidatePath } from 'next/cache';
 import { eq } from 'drizzle-orm';
 import { db, tables } from '@/db';
 import { getSession } from '@/lib/auth';
-import { CATEGORIES, getCategory, getListing } from '@/lib/categories';
+import { CATEGORIES, getCategory } from '@/lib/catalog';
 import { photoKey } from '@/lib/photos';
 
 /** Every key the catalog can legally hold — anything else is rejected outright. */
 function validKey(key: string): boolean {
-  const [categorySlug, listingSlug] = key.split(':');
-  const cat = getCategory(categorySlug);
-  if (!cat) return false;
-  return listingSlug ? Boolean(getListing(cat, listingSlug)) : true;
+  // V2 keys are a bare category slug — there are no platform sub-types to qualify them with.
+  return Boolean(getCategory(key));
 }
 
 async function assertAdmin() {

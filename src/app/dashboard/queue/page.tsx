@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { and, asc, eq, inArray } from 'drizzle-orm';
 import { db, tables } from '@/db';
 import { getMyShop } from '@/lib/auth';
-import { getCategory, listingLabel } from '@/lib/categories';
+import { categoryName } from '@/lib/catalog';
 import { specSummary } from '@/lib/spec';
 import { naira } from '@/lib/format';
 import { QUEUE_STATUSES, statusLabel } from '@/lib/status';
@@ -43,10 +43,10 @@ export default async function QueuePage() {
                   </span>
                   <div>
                     <p className="font-display font-extrabold text-navy">
-                      {getCategory(job.spec.category)?.name ?? job.spec.category}
+                      {categoryName(job.spec.category) ?? job.spec.category}
                       <span className="ml-2 font-mono text-xs font-bold text-black/40">{job.code}</span>
                     </p>
-                    <p className="mt-0.5 font-mono text-xs text-black/55">{specSummary(job.spec, listingLabel(job.spec.category, job.spec.listing)).join(' · ')}</p>
+                    <p className="mt-0.5 font-mono text-xs text-black/55">{specSummary(job.spec).join(' · ')}</p>
                     {job.printNote && (
                       <p className="mt-1.5 rounded-lg bg-pale/40 px-2.5 py-1.5 text-xs text-navy">
                         <span className="font-bold">Note:</span> {job.printNote}

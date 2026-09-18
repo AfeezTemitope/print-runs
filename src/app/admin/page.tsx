@@ -1,15 +1,14 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { LIVE_CATEGORIES, liveListings } from '@/lib/categories';
+import { BROWSABLE_CATEGORIES } from '@/lib/catalog';
 import { getCatalogPhotos, photoKey } from '@/lib/photos';
 
 export const metadata: Metadata = { title: 'Overview' };
 
 export default async function AdminHome() {
   const photos = await getCatalogPhotos();
-  const slots = LIVE_CATEGORIES.length + liveListings().filter(({ category }) => category.listings.length > 1).length;
-  const filled = LIVE_CATEGORIES.filter((c) => photos[photoKey(c.slug)]).length
-    + liveListings().filter(({ category, listing }) => category.listings.length > 1 && photos[photoKey(category.slug, listing.slug)]).length;
+  const slots = BROWSABLE_CATEGORIES.length;
+  const filled = BROWSABLE_CATEGORIES.filter((c) => photos[photoKey(c.slug)]).length;
 
   return (
     <div>

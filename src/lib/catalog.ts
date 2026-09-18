@@ -168,3 +168,47 @@ export const RESERVED_SLUGS = new Set([
 export function isReservedSlug(slug: string): boolean {
   return RESERVED_SLUGS.has(slug.toLowerCase());
 }
+
+/* ------------------------------------------------------------------ */
+/* Legacy compatibility                                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Orders placed before V2 carry the old fixed-catalogue slugs. They still have to render a
+ * sensible name on an order screen years later, so the mapping lives here rather than keeping
+ * the whole retired categories module alive for eight strings.
+ */
+const LEGACY_NAMES: Record<string, string> = {
+  banner: 'Flex / Banner',
+  jotter: 'Jotter',
+  flyer: 'Flyer',
+  business_card: 'Business Card',
+  sticker: 'Sticker',
+  nylon: 'Brand Nylon',
+  thank_you_card: 'Thank You Card',
+  id_card: 'ID Card',
+  frame: 'Frame',
+  paper_bag: 'Paper Bag',
+};
+
+/** Display name for any category slug, V2 or legacy. Never throws on an unknown slug. */
+export function categoryName(slug: string | undefined | null): string {
+  if (!slug) return '';
+  return getCategory(slug)?.name ?? LEGACY_NAMES[slug] ?? slug.replace(/[_-]/g, ' ');
+}
+
+/**
+ * Which V2 category a legacy slug became, for anything still keyed on the old values —
+ * principally the commercial margins seeded before the storefront rebuild.
+ */
+export const LEGACY_TO_V2: Record<string, string> = {
+  banner: 'banners-signage',
+  jotter: 'books-booklets',
+  flyer: 'flyers-handbills',
+  business_card: 'cards-stationery',
+  thank_you_card: 'cards-stationery',
+  sticker: 'stickers-labels',
+  nylon: 'packaging',
+  id_card: 'id-access',
+  frame: 'frames-photo',
+};

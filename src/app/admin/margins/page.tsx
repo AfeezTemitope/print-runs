@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { LIVE_CATEGORIES } from '@/lib/categories';
+import { LIVE_CATEGORIES } from '@/lib/catalog';
 import { getCategoryMargins } from '@/lib/margins';
 import { MarginEditor, type MarginRow } from './MarginEditor';
 
@@ -7,14 +7,13 @@ export const metadata: Metadata = { title: 'Margins' };
 
 // A representative job per category, purely so the preview shows a number that feels real.
 const SAMPLE: Record<string, { baseKobo: number; qty: number }> = {
-  banner: { baseKobo: 1_620_000, qty: 1 },
-  jotter: { baseKobo: 5_400_000, qty: 50 },
-  flyer: { baseKobo: 2_250_000, qty: 500 },
-  business_card: { baseKobo: 1_400_000, qty: 100 },
-  sticker: { baseKobo: 900_000, qty: 100 },
-  nylon: { baseKobo: 1_300_000, qty: 50 },
-  thank_you_card: { baseKobo: 550_000, qty: 100 },
-  id_card: { baseKobo: 700_000, qty: 10 },
+  'banners-signage': { baseKobo: 1_620_000, qty: 1 },
+  'books-booklets': { baseKobo: 5_400_000, qty: 50 },
+  'flyers-handbills': { baseKobo: 2_250_000, qty: 500 },
+  'cards-stationery': { baseKobo: 1_400_000, qty: 100 },
+  'stickers-labels': { baseKobo: 900_000, qty: 100 },
+  packaging: { baseKobo: 1_300_000, qty: 50 },
+  'id-access': { baseKobo: 700_000, qty: 10 },
 };
 
 export default async function AdminMarginsPage() {
@@ -26,7 +25,6 @@ export default async function AdminMarginsPage() {
     return {
       categorySlug: c.slug,
       name: c.name,
-      code: c.code,
       marginType: m?.marginType ?? 'fixed',
       value: m
         ? String(m.marginType === 'percent' ? m.marginPercentBps / 100 : m.marginFixedKobo / 100)

@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { db, tables } from '@/db';
 import { getSession } from '@/lib/auth';
-import { getCategory } from '@/lib/categories';
+import { getCategory, isLive } from '@/lib/catalog';
 
 export async function saveCategoryMargin(
   categorySlug: string,
@@ -12,7 +12,7 @@ export async function saveCategoryMargin(
 ) {
   const session = await getSession();
   if (!session || session.role !== 'admin') return { error: 'Not allowed.' };
-  if (!getCategory(categorySlug)?.live) return { error: 'Unknown category.' };
+  if (!isLive(categorySlug)) return { error: 'Unknown category.' };
 
   const n = Number(value || 0);
   if (!Number.isFinite(n) || n < 0) return { error: 'Enter a number.' };

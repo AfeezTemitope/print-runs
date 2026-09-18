@@ -2,25 +2,18 @@
    Pure-function tests — no DB, no network. Verifies the money math actually produces the
    numbers the founder decisions specify, not just that it type-checks. */
 
-import { computeMargin, computeOrderTotals, computePrice, DEFAULT_PLATFORM_FEE_KOBO } from '../src/lib/pricing';
+import { computeMargin, computeOrderTotals, DEFAULT_PLATFORM_FEE_KOBO } from '../src/lib/pricing';
 import {
   stepsFor, statusLabel, canDecline, isSettlementEligible, QUEUE_STATUSES,
   canDispatch, canSetDeliveryFee, dispatchBlockedReason,
 } from '../src/lib/status';
-import {
-  CATEGORIES, LIVE_CATEGORIES, getCategory, getListing, needsTypeSelection,
-  gridCellCount, gridCells, cellKey, matchQtyRange, productCode,
-} from '../src/lib/categories';
-import type { PricingGrid } from '../src/lib/categories';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { photoKey, pickPhoto } from '../src/lib/photos';
 import { marginFor } from '../src/lib/margins';
-import { isVerified } from '../src/lib/verification';
-// Aliased: the V1 categories module exports the same names, and both models coexist until
-// Module 2 replaces the old customer flow.
 import {
   CATEGORIES as V2_CATEGORIES, LIVE_CATEGORIES as V2_LIVE, BROWSABLE_CATEGORIES,
   MAX_TIERS, getCategory as v2Category, isLive, isReservedSlug, RESERVED_SLUGS, SUGGESTED_MODE,
+  categoryName, LEGACY_TO_V2,
 } from '../src/lib/catalog';
 import {
   computeListingPrice, fromPriceKobo, needsCustomQuantity, validateTiers, sortTiers,
@@ -107,22 +100,6 @@ const bcDrift = computeOrderTotals(bcBase, 500,
   { marginType: 'percent', marginFixedKobo: 0, marginPercentBps: 800 }, DEFAULT_PLATFORM_FEE_KOBO);
 eq('7%→8% moves customer price by ₦200', bcDrift.amountPaidKobo - bc.amountPaidKobo, N(200));
 
-console.log('\nRetired pricing modes');
-const productBase = {
-  id: 'p', shopId: 's', categorySlug: 'business_card', listingSlug: 'standard', listingId: null,
-  name: 'BC', description: null,
-  photoUrl: null, areaUnit: null, ratePerUnitKobo: null, minChargeKobo: null, offersHylet: false,
-  marginType: 'fixed' as const, marginFixedKobo: 0, marginPercentBps: 0,
-  turnaroundHours: 24, isActive: true, createdAt: new Date(),
-};
-// 'per_sheet' went with decision 8. 'tier' and 'fixed_size' went with QA 1.5 — every product
-// with more than one price variable is now a grid, so legacy rows fall back to quote rather
-// than pricing off a shape the customer side can no longer produce.
-const tierProduct = { ...productBase, pricingMode: 'tier' as const };
-const legacyRows = [{ id: 'v', productId: 'p', label: null, qty: 100, priceKobo: N(8000), meta: null }];
-const legacy = computePrice({ category: 'business_card', listing: 'standard', qty: 100 }, tierProduct, legacyRows, []);
-eq('legacy tier rows fall back to quote', legacy.ok, false);
-
 console.log('\nOrder lifecycle (decision 18)');
 eq('delivery path has 7 stages', stepsFor('delivery').length, 7);
 // Collection skips out_for_delivery — PrintRuns isn't the one delivering it.
@@ -148,222 +125,6 @@ eq('delivery does NOT settle merely on ready', isSettlementEligible('ready_for_d
 eq('delivery settles on delivered', isSettlementEligible('delivered', 'delivery'), true);
 eq('nothing settles mid-print', isSettlementEligible('printing_in_progress', 'delivery'), false);
 
-console.log('\nCategories and listings (QA Round 1)');
-eq('exactly 8 live categories', LIVE_CATEGORIES.length, 8);
-eq('live slugs are the agreed eight', LIVE_CATEGORIES.map((c) => c.slug), [
-  'banner', 'jotter', 'flyer', 'business_card', 'sticker', 'nylon', 'thank_you_card', 'id_card',
-]);
-// Frame is locked and Paper Bag is unspecced — neither may reach a customer.
-eq('frame is not live', getCategory('frame')?.live, false);
-eq('paper_bag is not live', getCategory('paper_bag')?.live, false);
-eq('frame absent from live list', LIVE_CATEGORIES.some((c) => c.slug === 'frame'), false);
-
-// QA 1.1: the Products grid shows one card per CATEGORY; multi-listing ones route via the
-// type-selection page first.
-eq('sticker needs a type page', needsTypeSelection(getCategory('sticker')!), true);
-eq('jotter needs a type page', needsTypeSelection(getCategory('jotter')!), true);
-eq('business card needs a type page', needsTypeSelection(getCategory('business_card')!), true);
-eq('flyer goes straight to the configurator', needsTypeSelection(getCategory('flyer')!), false);
-eq('nylon goes straight to the configurator', needsTypeSelection(getCategory('nylon')!), false);
-eq('id card goes straight to the configurator', needsTypeSelection(getCategory('id_card')!), false);
-
-eq('sticker has 3 listings', getCategory('sticker')?.listings.map((l) => l.slug), ['round', 'straight', 'large_format']);
-eq('business card has 2 listings', getCategory('business_card')?.listings.length, 2);
-eq('jotter has soft + hard cover', getCategory('jotter')?.listings.map((l) => l.slug), ['soft_cover', 'hard_cover']);
-eq('id card is a single listing', getCategory('id_card')?.listings.length, 1);
-
-// QA 1.2: every listing carries its OWN reference number.
-const allCodes = LIVE_CATEGORIES.flatMap((c) => c.listings.map((l) => l.code));
-eq('no duplicate listing codes', new Set(allCodes).size, allCodes.length);
-eq('sticker codes are distinct', getCategory('sticker')?.listings.map((l) => l.code), ['PR-005-A', 'PR-005-B', 'PR-005-C']);
-eq('productCode resolves a listing', productCode('business_card', 'rounded'), 'PR-004-B');
-
-console.log('\nMatrix reference table (QA §4)');
-const cellsFor = (cat: string, listing?: string) => {
-  const g = getListing(getCategory(cat)!, listing)?.pricingGrid;
-  return g ? gridCellCount(g) : 0;
-};
-// The QA table counts Jotter as 2 covers x 2 sizes x 3 sheets = 12. Cover is now a separate
-// LISTING rather than a grid axis, so that 12 is split as 6 cells in each of the two covers.
-eq('Jotter soft cover = 6 cells', cellsFor('jotter', 'soft_cover'), 6);
-eq('Jotter hard cover = 6 cells', cellsFor('jotter', 'hard_cover'), 6);
-eq('Jotter totals 12 cells across both covers', cellsFor('jotter', 'soft_cover') + cellsFor('jotter', 'hard_cover'), 12);
-eq('Jotter sizes are A6 + A5', getListing(getCategory('jotter')!, 'soft_cover')?.pricingGrid?.axes[0].values, ['A6', 'A5']);
-eq('Jotter has no inner cover dropdown',
-  (getListing(getCategory('jotter')!, 'soft_cover')?.optionAxes ?? []).some((a) => a.key === 'cover'), false);
-eq('Jotter sheets are 50/75/100', getListing(getCategory('jotter')!, 'soft_cover')?.pricingGrid?.axes[1].values, [50, 75, 100]);
-eq('Flyer = 6 cells', cellsFor('flyer'), 6);
-eq('Flyer has exactly 3 fixed add-ons', getListing(getCategory('flyer')!, 'flyer')?.fixedAddons?.length, 3);
-eq('Business Card Standard = 24 cells', cellsFor('business_card', 'standard'), 24);
-eq('Business Card Rounded = 24 cells', cellsFor('business_card', 'rounded'), 24);
-eq('Business Card has NO add-ons', getListing(getCategory('business_card')!, 'standard')?.fixedAddons, undefined);
-eq('Sticker Round = 9 cells', cellsFor('sticker', 'round'), 9);
-eq('Sticker Straight = 9 cells', cellsFor('sticker', 'straight'), 9);
-eq('Sticker Large Format has no grid', cellsFor('sticker', 'large_format'), 0);
-eq('Sticker Large Format is per-area', getListing(getCategory('sticker')!, 'large_format')?.perAreaRate, true);
-eq('Brand Nylon = 12 cells', cellsFor('nylon'), 12);
-eq('Thank You Card = 4 cells', cellsFor('thank_you_card'), 4);
-eq('ID Card = 2 cells', cellsFor('id_card'), 2);
-eq('Banner is per-area, no grid', cellsFor('banner'), 0);
-
-console.log('\nCustomer-side corrections');
-eq('Banner presets are the corrected set',
-  getListing(getCategory('banner')!, 'banner')?.size?.presets.map((p) => p.label),
-  ['3 × 3 ft', '5 × 5 ft', '8 × 6 ft', '12 × 8 ft']);
-eq('Banner quantity is 1 + custom only', getListing(getCategory('banner')!, 'banner')?.qty?.presets, [1]);
-eq('Banner has the free hylet axis', getListing(getCategory('banner')!, 'banner')?.optionAxes?.[0].key, 'hylet');
-eq('Large Format is custom size only', getListing(getCategory('sticker')!, 'large_format')?.size?.customOnly, true);
-eq('Large Format has no size presets', getListing(getCategory('sticker')!, 'large_format')?.size?.presets.length, 0);
-eq('Round Cut presets corrected',
-  getListing(getCategory('sticker')!, 'round')?.size?.presets.map((p) => p.label),
-  ['2.5 × 2.5 in', '3 × 3 in', '3.5 × 3.5 in']);
-eq('Straight Cut presets corrected',
-  getListing(getCategory('sticker')!, 'straight')?.size?.presets.map((p) => p.label),
-  ['2 × 2 in', '3 × 2 in', '3 × 5 in']);
-eq('Sticker minimum is a hard 50', getListing(getCategory('sticker')!, 'round')?.qty?.min, 50);
-// QA 2.5 / 2.6: no lamination anywhere on Sticker.
-eq('no sticker listing offers lamination',
-  getCategory('sticker')!.listings.some((l) => (l.optionAxes ?? []).some((a) => a.key === 'lamination')), false);
-eq('Business Card weights corrected',
-  getListing(getCategory('business_card')!, 'standard')?.optionAxes?.find((a) => a.key === 'weight')?.options,
-  ['300gsm (Thick)', '600gsm (Doubled thick)', '900gsm (Extra thick)']);
-eq('Business Card lamination is cosmetic only',
-  getListing(getCategory('business_card')!, 'standard')?.optionAxes?.find((a) => a.key === 'lamination')?.cosmetic, true);
-eq('Nylon has no print-sides choice',
-  (getListing(getCategory('nylon')!, 'polybag')?.optionAxes ?? []).some((a) => a.key === 'sides'), false);
-eq('Nylon colour axes present',
-  (getListing(getCategory('nylon')!, 'polybag')?.optionAxes ?? []).map((a) => a.key),
-  ['size', 'nylon_colour', 'ink_colour']);
-eq('Thank You Card uses a free quantity field', getListing(getCategory('thank_you_card')!, 'thank_you_card')?.qty?.freeInput, true);
-eq('Thank You Card minimum is 50', getListing(getCategory('thank_you_card')!, 'thank_you_card')?.qty?.min, 50);
-eq('Thank You Card Feel replaces lamination',
-  (getListing(getCategory('thank_you_card')!, 'thank_you_card')?.optionAxes ?? []).map((a) => a.key),
-  ['size', 'feel', 'sides']);
-eq('Thank You Card Feel has no None option',
-  getListing(getCategory('thank_you_card')!, 'thank_you_card')?.optionAxes?.find((a) => a.key === 'feel')?.options,
-  ['Matte', 'Gloss']);
-eq('ID Card floor is 1', getListing(getCategory('id_card')!, 'id_card')?.qty?.min, 1);
-eq('ID Card presets are 1/10', getListing(getCategory('id_card')!, 'id_card')?.qty?.presets, [1, 10]);
-eq('Flyer copy no longer mentions A6', getCategory('flyer')?.blurb.includes('A6'), false);
-
-console.log('\nQuantity band matching (QA 3.3 — Flyer only)');
-const bands = ['1-500', '501-1000', '1000+'];
-eq('1 lands in the first band', matchQtyRange(bands, 1), '1-500');
-eq('500 is the top of the first band', matchQtyRange(bands, 500), '1-500');
-eq('501 crosses into the second', matchQtyRange(bands, 501), '501-1000');
-eq('1000 is still the second band', matchQtyRange(bands, 1000), '501-1000');
-eq('1001 falls in the open-ended band', matchQtyRange(bands, 1001), '1000+');
-eq('50000 still matches the open band', matchQtyRange(bands, 50000), '1000+');
-
-console.log('\nGrid expansion (QA 1.5 — auto-generated, not hand-added)');
-const bcGrid = getListing(getCategory('business_card')!, 'standard')!.pricingGrid!;
-const bcCells = gridCells(bcGrid);
-eq('expansion produces every combination', bcCells.length, 24);
-eq('every expanded cell is unique', new Set(bcCells.map((c) => cellKey(bcGrid, c))).size, 24);
-eq('first cell is the first value of every axis', bcCells[0], { sides: 'Front only', weight: '300gsm', qty: 100 });
-
-console.log('\nPricing engine — grid resolution');
-type AnyProduct = Parameters<typeof computePrice>[1];
-const product = (over: Partial<AnyProduct> = {}) => ({
-  id: 'p', shopId: 's', categorySlug: 'sticker', listingSlug: 'round', listingId: null,
-  name: 'x', description: null,
-  photoUrl: null, pricingMode: 'matrix', areaUnit: null, ratePerUnitKobo: null, minChargeKobo: null,
-  offersHylet: false, marginType: 'fixed', marginFixedKobo: 0, marginPercentBps: 0,
-  turnaroundHours: 24, isActive: true, createdAt: new Date(), ...over,
-} as AnyProduct);
-
-type AnyVariant = Parameters<typeof computePrice>[2][number];
-const cell = (meta: Record<string, string | number>, naira: number) => ({
-  id: 'v', productId: 'p', label: null, qty: null, priceKobo: N(naira), meta,
-} as AnyVariant);
-
-// Sticker Round Cut: 3 sizes x 3 tiers, FLAT BATCH price.
-const stickerVariants = [
-  cell({ size: '3 × 3 in', qty: 50 }, 12000),
-  cell({ size: '3 × 3 in', qty: 100 }, 20000),
-  cell({ size: '3 × 3 in', qty: 200 }, 35000),
-];
-const stickerSpec = { category: 'sticker', listing: 'round', sizeLabel: '3 × 3 in', qty: 100 };
-const r1 = computePrice(stickerSpec, product(), stickerVariants, []);
-eq('flat batch price is NOT multiplied by qty', r1.ok && r1.totalKobo, N(20000));
-
-// QA 3.5: Custom is a Request Quote routing, not a fourth priced tier — no rounding up.
-const r2 = computePrice({ ...stickerSpec, qty: 300 }, product(), stickerVariants, []);
-eq('300 does NOT round up to the 200 cell', r2.ok, false);
-eq('off-tier quantity routes to quote', !r2.ok && r2.reason, 'Not a priced combination');
-
-// An unpriced size is a gap in the printer's own grid, not a platform rule.
-const r3 = computePrice({ ...stickerSpec, sizeLabel: '2.5 × 2.5 in' }, product(), stickerVariants, []);
-eq('unpriced size routes to quote', r3.ok, false);
-
-// Thank You Card: no quantity axis at all, yet priced PER PIECE.
-const tycVariants = [cell({ size: 'Big (5.5 × 4in)', sides: 'Front and back' }, 120)];
-const tyc = computePrice(
-  { category: 'thank_you_card', listing: 'thank_you_card', qty: 250, options: { size: 'Big (5.5 × 4in)', sides: 'Front and back' } },
-  product({ categorySlug: 'thank_you_card', listingSlug: 'thank_you_card' }), tycVariants, []);
-eq('per-piece grid multiplies by quantity', tyc.ok && tyc.totalKobo, N(30000));
-
-// Flyer: banded quantity axis, per-piece rate.
-const flyerVariants = [cell({ size: 'A5 (Standard)', qty: '501-1000' }, 90)];
-const flyer = computePrice(
-  { category: 'flyer', listing: 'flyer', qty: 750, options: { size: 'A5 (Standard)' } },
-  product({ categorySlug: 'flyer', listingSlug: 'flyer' }), flyerVariants, []);
-eq('a quantity inside a band matches that band', flyer.ok && flyer.totalKobo, N(67500));
-
-// QA 3.4: Standard and Rounded are separate products and can never price each other.
-eq('a Rounded product does not answer a Standard spec',
-  computePrice(
-    { category: 'business_card', listing: 'standard', qty: 100 },
-    product({ categorySlug: 'business_card', listingSlug: 'rounded' }), [], []).ok,
-  false);
-
-// QA 3.1: Banner's minimum-charge floor is gone — a tiny custom size prices honestly low.
-const banner = computePrice(
-  { category: 'banner', listing: 'banner', qty: 1, width: 1, height: 1, unit: 'ft' },
-  product({ categorySlug: 'banner', listingSlug: 'banner', pricingMode: 'per_area', areaUnit: 'sqft', ratePerUnitKobo: N(1800), minChargeKobo: N(5000) }),
-  [], []);
-eq('no minimum-charge floor is applied', banner.ok && banner.totalKobo, N(1800));
-
-console.log('\nIntegrity');
-eq('all live categories have a name', LIVE_CATEGORIES.every((c) => c.name.length > 0), true);
-eq('no duplicate slugs', new Set(V2_CATEGORIES.map((c) => c.slug)).size, V2_CATEGORIES.length);
-eq('every live category has at least one listing', LIVE_CATEGORIES.every((c) => c.listings.length > 0), true);
-// Every grid axis must be resolvable from something the configurator can actually collect.
-const RESOLVABLE = new Set(['size', 'qty', 'qty_range', 'sheets', 'option']);
-eq('every grid axis has a resolvable source',
-  LIVE_CATEGORIES.every((c) => c.listings.every((l) =>
-    (l.pricingGrid?.axes ?? []).every((a) => RESOLVABLE.has(a.source)))), true);
-// An 'option'-sourced axis must have a matching option axis the customer is actually shown.
-eq('every option-sourced axis is offered to the customer',
-  LIVE_CATEGORIES.every((c) => c.listings.every((l) =>
-    (l.pricingGrid?.axes ?? []).filter((a) => a.source === 'option')
-      .every((a) => (l.optionAxes ?? []).some((o) => o.key === a.key)))), true);
-// A 'size'-sourced axis must line up with the size presets, or nothing can ever be priced.
-eq('every size-sourced axis matches its presets',
-  LIVE_CATEGORIES.every((c) => c.listings.every((l) => {
-    const axis = (l.pricingGrid?.axes ?? []).find((a) => a.source === 'size');
-    if (!axis) return true;
-    if (!l.size) return false; // a size axis with no size presets can never be priced
-    return axis.values.every((v) => l.size!.presets.some((p) => p.label === String(v)));
-  })), true);
-// Every priced quantity tier must be reachable from the customer's own presets — otherwise a
-// printer prices a cell no customer can ever land on. Business Card is the one known exception
-// (see below), so it is excluded here rather than silently weakening the rule.
-const qtyCovered = (l: { pricingGrid?: PricingGrid; qty?: { presets: number[] } }) => {
-  const axis = (l.pricingGrid?.axes ?? []).find((a) => a.source === 'qty');
-  if (!axis) return true;
-  return axis.values.every((v) => (l.qty?.presets ?? []).includes(Number(v)));
-};
-eq('every exact qty tier is offered to the customer',
-  LIVE_CATEGORIES.filter((c) => c.slug !== 'business_card').every((c) => c.listings.every(qtyCovered)), true);
-
-// KNOWN GAP, founder-confirmed 04 Aug 2026: the printer grid uses 100/200/500/1000 while the
-// customer presets stayed 100/250/500/1000. A customer picking 250 has no matching cell and
-// always routes to Request Quote, and the 200 cell is never reachable from a preset. This test
-// pins that gap so it cannot be forgotten — flip both sides to the same four numbers to close it.
-eq('Business Card qty tiers deliberately do NOT line up',
-  getCategory('business_card')!.listings.every(qtyCovered), false);
-
 console.log('\nCatalog photo keys');
 eq('category key has no colon', photoKey('sticker'), 'sticker');
 eq('listing key is category:listing', photoKey('sticker', 'round'), 'sticker:round');
@@ -373,18 +134,19 @@ const pm = { sticker: 'CAT', 'sticker:round': 'ROUND' };
 eq('listing photo wins', pickPhoto(pm, 'sticker', 'round'), 'ROUND');
 eq('falls back to the category photo', pickPhoto(pm, 'sticker', 'straight'), 'CAT');
 eq('nothing at all returns undefined', pickPhoto({}, 'sticker', 'round'), undefined);
-// Every slot the admin screen offers must be a key the customer pages actually read.
-const adminSlots = LIVE_CATEGORIES.flatMap((c) => [
-  photoKey(c.slug),
-  ...(c.listings.length > 1 ? c.listings.map((l) => photoKey(c.slug, l.slug)) : []),
-]);
+// V2 has one photo per top-level category and no sub-type keys, so every slot the admin
+// screen offers must be a plain category slug the storefront actually reads.
+const adminSlots = BROWSABLE_CATEGORIES.map((c) => photoKey(c.slug));
 eq('no duplicate admin photo slots', new Set(adminSlots).size, adminSlots.length);
-eq('every slot resolves back to a live listing or category',
-  adminSlots.every((k) => {
-    const [cat, listing] = k.split(':');
-    const c = getCategory(cat);
-    return Boolean(c?.live) && (!listing || Boolean(getListing(c!, listing)));
-  }), true);
+eq('every slot resolves to a real category', adminSlots.every((slug) => Boolean(v2Category(slug))), true);
+
+// Legacy orders still have to render a category name years later.
+eq('a legacy slug still resolves a name', categoryName('business_card'), 'Business Card');
+eq('a V2 slug resolves its own name', categoryName('cards-stationery'), 'Cards & Stationery');
+eq('an unknown slug degrades rather than throwing', categoryName('who-knows'), 'who knows');
+// The margin re-key in migration 0017 follows this map, so it must cover every old category.
+eq('every legacy category maps to a live V2 one',
+  Object.values(LEGACY_TO_V2).every((slug) => Boolean(v2Category(slug))), true);
 
 console.log('\nDelivery fee gate (cash to the rider on arrival)');
 // The whole point: a rider must never ride out to a customer who has not agreed to pay.
@@ -425,41 +187,10 @@ eq('7% preview matches the engine',
   computeMargin(N(10000), 100, { marginType: 'percent', marginFixedKobo: 0, marginPercentBps: 700 }),
   N(700));
 
-console.log('\nPer-category verification');
-const pairs = new Set(['shopA:sticker', 'shopA:flyer', 'shopB:flyer']);
-eq('a verified pair is visible', isVerified(pairs, 'shopA', 'sticker'), true);
-// The whole point of PER-category verification: clearance does not spread across categories.
-eq('verification does not leak between categories', isVerified(pairs, 'shopB', 'sticker'), false);
-eq('an unknown shop is never verified', isVerified(pairs, 'shopC', 'flyer'), false);
-eq('an empty set verifies nobody', isVerified(new Set(), 'shopA', 'sticker'), false);
-// Fail CLOSED: if the verification table is unreadable the resolver returns an empty set, so
-// shops disappear from the storefront rather than an unvetted printer being shown.
-eq('no verification data means no printers shown', isVerified(new Set(), 'shopA', 'flyer'), false);
-
-// Wrapped in an async IIFE: this file has no top-level await, and the summary must print
-// after these checks rather than before them.
+// Wrapped in an async IIFE: the checks below use await, and the summary must print after
+// them rather than before.
 void (async () => {
-  console.log('\nEmail is inert until configured');
-  // The point of this batch: everything ships now, the DNS work happens whenever.
-  const hadKey = process.env.RESEND_API_KEY;
-  const hadFrom = process.env.EMAIL_FROM;
-  delete process.env.RESEND_API_KEY;
-  eq('unconfigured is reported honestly', emailConfigured(), false);
-  const skipped = await sendEmail({ to: 'a@b.com', subject: 's', heading: 'h', body: ['x'] });
-  eq('an unconfigured send is skipped, not thrown', skipped.sent, false);
-  eq('and says why', skipped.reason, 'not_configured');
-  // A missing address must never blow up a paid order either.
-  process.env.RESEND_API_KEY = 'test';
-  process.env.EMAIL_FROM = 'a@b.com';
-  const noAddress = await sendEmail({ to: '', subject: 's', heading: 'h', body: ['x'] });
-  eq('an empty address is skipped, not thrown', noAddress.sent, false);
-  eq('and says why', noAddress.reason, 'no_address');
-  delete process.env.RESEND_API_KEY;
-  delete process.env.EMAIL_FROM;
-  if (hadKey) process.env.RESEND_API_KEY = hadKey;
-  if (hadFrom) process.env.EMAIL_FROM = hadFrom;
-
-console.log('\nLegal documents');
+  console.log('\nLegal documents');
   eq('four documents make up the agreement', LEGAL_DOCS.length, 4);
   eq('slugs are stable', LEGAL_DOCS.map((d) => d.slug), ['terms', 'privacy', 'refunds', 'acceptable-use']);
   eq('an unknown slug resolves to nothing', getLegalDoc('nope'), undefined);

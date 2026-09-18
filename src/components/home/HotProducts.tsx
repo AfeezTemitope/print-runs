@@ -1,67 +1,52 @@
 import Link from 'next/link';
-import { CATEGORIES, productCode, categoryMoq } from '@/lib/categories';
+import { BROWSABLE_CATEGORIES } from '@/lib/catalog';
 import { Glyph } from '@/components/ui/Glyph';
-import { CodeBadge } from '@/components/ui/CodeBadge';
+import type { GlyphKind } from '@/components/ui/Glyph';
 
-/** "HOT" stays red — the one sanctioned accent-word use (spec §7.2). */
+/**
+ * Homepage category strip. Routes into the printer results list rather than a configurator —
+ * under V2 the customer picks a printer before they pick a spec.
+ */
 export function HotProducts() {
   return (
-    <section id="products" className="bg-fade-pale">
-      <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6 md:py-20">
-        <div className="mb-8">
-          <h2 className="font-display text-4xl font-extrabold tracking-tight text-black sm:text-5xl">
-            <span className="text-red">Hot</span> Products
-          </h2>
-          <p className="mt-2 text-black/60">Most-printed this week. Tap one to start a job.</p>
-        </div>
+    <section className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
+      <h2 className="font-display text-3xl font-extrabold tracking-tight text-black">
+        What are you printing?
+      </h2>
+      <p className="mt-1.5 text-black/60">Pick a category and see printers near you who do it.</p>
 
-        <ul className="grid grid-cols-2 gap-3.5 sm:gap-5 lg:grid-cols-4">
-          {CATEGORIES.map((c) => (
+      <ul className="mt-6 grid grid-cols-2 gap-3.5 sm:grid-cols-3 lg:grid-cols-4">
+        {BROWSABLE_CATEGORIES.map((c) => {
+          const soon = c.status !== 'live';
+          const body = (
+            <>
+              <Glyph kind={c.glyph as GlyphKind} color={c.hue} className="size-12" />
+              <div>
+                <h3 className="font-display text-[15px] font-extrabold tracking-tight text-navy">{c.name}</h3>
+                <p className="mt-0.5 text-[13px] text-black/55">{c.blurb}</p>
+              </div>
+              <span className="mt-auto border-t border-dashed border-black/25 pt-2.5 font-display text-[13px] font-bold text-navy">
+                {soon ? 'Coming soon' : <>Find printers <span aria-hidden>→</span></>}
+              </span>
+            </>
+          );
+
+          return (
             <li key={c.slug}>
-              {c.live ? (
-                <Link
-                  href={`/configure/${c.slug}`}
-                  className="group flex h-full flex-col overflow-hidden rounded-2xl border border-black/12 bg-white transition-all hover:-translate-y-0.5 hover:border-blue hover:shadow-[0_10px_30px_-12px_rgba(0,0,255,0.25)]"
-                >
-                  <div className="relative grid aspect-[1.25/1] place-items-center border-b border-black/10 bg-white p-5">
-                    <Glyph kind={c.glyph} color={c.hue} className="size-16 sm:size-20" />
-                    <span className="absolute right-2.5 top-2.5"><CodeBadge code={productCode(c.slug)} /></span>
-                  </div>
-                  <div className="flex flex-1 flex-col gap-2.5 p-4">
-                    <h3 className="font-display text-lg font-extrabold tracking-tight text-navy">{c.name}</h3>
-                    <div className="flex flex-wrap gap-1.5">
-                      <span className="rounded-pill bg-blue px-2.5 py-1 font-mono text-[9px] font-bold uppercase tracking-wider text-white">
-                        Ready in {c.turnaround}
-                      </span>
-                      {categoryMoq(c) && (
-                        <span className="rounded-pill border border-black/20 px-2.5 py-1 font-mono text-[9px] font-bold uppercase tracking-wider text-navy">
-                          MOQ {categoryMoq(c)}
-                        </span>
-                      )}
-                    </div>
-                    <span className="mt-auto border-t border-dashed border-black/25 pt-2.5 font-display text-[13px] font-bold text-navy transition-colors group-hover:text-blue">
-                      Print now <span aria-hidden>→</span>
-                    </span>
-                  </div>
-                </Link>
-              ) : (
-                <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-dashed border-black/20 bg-white/60">
-                  <div className="relative grid aspect-[1.25/1] place-items-center border-b border-dashed border-black/15 p-5 opacity-45">
-                    <Glyph kind={c.glyph} color={c.hue} className="size-16 sm:size-20" />
-                    <span className="absolute right-2.5 top-2.5"><CodeBadge code={productCode(c.slug)} tone="light" /></span>
-                  </div>
-                  <div className="flex flex-1 flex-col gap-2.5 p-4">
-                    <h3 className="font-display text-lg font-extrabold tracking-tight text-navy/60">{c.name}</h3>
-                    <span className="mt-auto border-t border-dashed border-black/20 pt-2.5 font-mono text-[10px] font-bold uppercase tracking-widest text-navy/50">
-                      Coming soon
-                    </span>
-                  </div>
+              {soon ? (
+                <div className="flex h-full flex-col gap-3 rounded-2xl border border-dashed border-black/20 bg-white/60 p-5 opacity-70">
+                  {body}
                 </div>
+              ) : (
+                <Link href={`/printers?category=${c.slug}`}
+                  className="group flex h-full flex-col gap-3 rounded-2xl border border-black/12 bg-white p-5 transition-all hover:-translate-y-0.5 hover:border-blue">
+                  {body}
+                </Link>
               )}
             </li>
-          ))}
-        </ul>
-      </div>
+          );
+        })}
+      </ul>
     </section>
   );
 }

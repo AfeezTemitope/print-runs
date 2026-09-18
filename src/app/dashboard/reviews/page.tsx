@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { desc, eq } from 'drizzle-orm';
+import { FlagReview } from './FlagReview';
 import { Star } from 'lucide-react';
 import { db, tables } from '@/db';
 import { getMyShop } from '@/lib/auth';
@@ -44,6 +45,13 @@ export default async function ReviewsPage() {
                 <span className="text-xs text-black/45">{firstName} · {shortDate(review.createdAt)}</span>
               </div>
               {review.comment && <p className="mt-2.5 text-sm leading-relaxed text-black/70">{review.comment}</p>}
+              {review.removedAt ? (
+                <p className="mt-1.5 font-mono text-[10px] font-bold uppercase tracking-widest text-red">
+                  Removed by PrintRuns
+                </p>
+              ) : (
+                <FlagReview reviewId={review.id} flagged={Boolean(review.flaggedAt)} />
+              )}
             </li>
           ))}
         </ul>
