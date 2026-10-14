@@ -1,4 +1,5 @@
 import type { products } from '@/db/schema';
+import { DEFAULT_FEE_BANDS, type FeeBands } from '@/lib/platform-fee';
 
 /**
  * Commercial pricing: the layer PrintRuns adds on top of whatever a printer charges.
@@ -28,11 +29,22 @@ export type MarginableProduct = Pick<Product, 'marginType' | 'marginFixedKobo' |
  * decision 23: 7%) applies to the whole Printer Base Price for the line — scaling by qty
  * happens automatically since printerBaseKobo already reflects the full line total.
  */
-export function computeMargin(printerBaseKobo: number, qty: number, product: MarginableProduct): number {
+/**
+ * PrintRuns' commercial margin on one ORDER.
+ *
+ * A fixed margin is per order, never per piece. Under V1 it multiplied by quantity, because
+ * the platform defined the product and knew a unit meant one card. Under V2 a printer's own
+ * quantity tier is a BATCH total — "50 bags for ₦12,000" — so multiplying per piece turned a
+ * ₦12,000 job into ₦37,000 and made every quantity-priced listing unusable.
+ *
+ * qty is kept in the signature so existing callers need no change, and so a per-piece variant
+ * can be reintroduced deliberately rather than by accident.
+ */
+export function computeMargin(printerBaseKobo: number, _qty: number, product: MarginableProduct): number {
   if (product.marginType === 'percent') {
     return Math.round((printerBaseKobo * product.marginPercentBps) / 10000);
   }
-  return product.marginFixedKobo * Math.max(1, qty);
+  return product.marginFixedKobo;
 }
 
 export type OrderTotals = {
@@ -74,4 +86,23 @@ export async function getPlatformFeeKobo(
 ): Promise<number> {
   const row = await lookup('platform_service_fee_kobo');
   return row?.valueKobo ?? DEFAULT_PLATFORM_FEE_KOBO;
+}
+
+/**
+ * The banded fee (brief item #10). Reads all three values from platform_settings so they are
+ * editable from admin, falling back to the defaults when a row is missing.
+ */
+export async function getFeeBands(
+  lookup: (key: string) => Promise<{ valueKobo: number } | undefined>,
+): Promise<FeeBands> {
+  const [low, high, threshold] = await Promise.all([
+    lookup('platform_fee_low_kobo'),
+    lookup('platform_fee_high_kobo'),
+    lookup('platform_fee_threshold_kobo'),
+  ]);
+  return {
+    lowKobo: low?.valueKobo ?? DEFAULT_FEE_BANDS.lowKobo,
+    highKobo: high?.valueKobo ?? DEFAULT_FEE_BANDS.highKobo,
+    thresholdKobo: threshold?.valueKobo ?? DEFAULT_FEE_BANDS.thresholdKobo,
+  };
 }

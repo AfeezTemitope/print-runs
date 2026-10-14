@@ -11,6 +11,21 @@ import { latestVerification, shouldNudgeTier2 } from '@/lib/trust';
 
 export const metadata: Metadata = { title: 'Dashboard' };
 
+/**
+ * Item #12a: a greeting rather than "OVERVIEW". Uses West Africa Time explicitly — the server
+ * runs in UTC, so a printer opening their dashboard at 8am Lagos time would otherwise be told
+ * good evening either side of midnight.
+ */
+function greeting(): string {
+  const lagosHour = Number(
+    new Intl.DateTimeFormat('en-NG', { timeZone: 'Africa/Lagos', hour: 'numeric', hour12: false })
+      .format(new Date()),
+  );
+  if (lagosHour < 12) return 'Good morning';
+  if (lagosHour < 17) return 'Good afternoon';
+  return 'Good evening';
+}
+
 /** Screen 2 (spec §4): stat cards + recent orders. */
 export default async function DashboardPage() {
   const shop = (await getMyShop())!;
@@ -51,7 +66,9 @@ export default async function DashboardPage() {
 
   return (
     <div>
-      <h1 className="font-display text-3xl font-extrabold tracking-tight text-black">Overview</h1>
+      <h1 className="font-display text-3xl font-extrabold tracking-tight text-black">
+        {greeting()}, {shop.businessName.split(' ')[0]}.
+      </h1>
 
       {nudge && (
         <Link href="/dashboard/verify"

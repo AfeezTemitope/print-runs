@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { Logo } from '@/components/ui/Logo';
 import { ButtonLink } from '@/components/ui/Button';
 import { getSession } from '@/lib/auth';
+import { homeForRole, homeLabelForRole } from '@/lib/home-for-role';
 import { AccountMenu } from './AccountMenu';
 
 /**
@@ -10,12 +11,15 @@ import { AccountMenu } from './AccountMenu';
  */
 export async function TopNav() {
   const session = await getSession();
+  // Item #11: the logo and Home follow the signed-in role, so a printer is never dropped into
+  // the customer view and left wondering whether their session expired.
+  const home = homeForRole(session?.role);
   return (
     <header className="sticky top-0 z-50 bg-nav-gradient text-white">
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
-        <Logo />
+        <Logo href={home} label={homeLabelForRole(session?.role)} />
         <nav className="hidden items-center gap-7 font-display text-[15px] font-semibold md:flex" aria-label="Main">
-          <Link href="/" className="opacity-90 transition-opacity hover:opacity-100">Home</Link>
+          <Link href={home} className="opacity-90 transition-opacity hover:opacity-100">Home</Link>
           <Link href="/products" className="opacity-90 transition-opacity hover:opacity-100">Products</Link>
           <Link href="/track" className="opacity-90 transition-opacity hover:opacity-100">Track Order</Link>
           <Link href="/orders" className="opacity-90 transition-opacity hover:opacity-100">My Orders</Link>

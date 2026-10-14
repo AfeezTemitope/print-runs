@@ -22,6 +22,7 @@ export default async function StorefrontPage() {
     addressCity: shop.addressCity ?? '',
     addressState: shop.addressState ?? '',
     whatsapp: shop.whatsapp ?? '',
+    instagram: shop.instagram ?? '',
     listingCount: listings.length,
   };
 

@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server';
 import { and, eq } from 'drizzle-orm';
 import { db, tables } from '@/db';
 import { getSession } from '@/lib/auth';
-import { getPlatformFeeKobo } from '@/lib/pricing';
+import { getFeeBands } from '@/lib/pricing';
+import { platformFeeFor } from '@/lib/platform-fee';
 import { getCategoryMargins, marginFor } from '@/lib/margins';
 import { computeMargin } from '@/lib/pricing';
 import { paystackInitialize } from '@/lib/paystack';
@@ -30,9 +31,9 @@ export async function POST(req: Request) {
   if (!order.quotedPriceKobo) return NextResponse.json({ error: 'No quote to pay yet.' }, { status: 400 });
   if (order.status === 'cancelled') return NextResponse.json({ error: 'That order was cancelled.' }, { status: 400 });
 
-  const [margins, platformFeeKobo] = await Promise.all([
+  const [margins, feeBands] = await Promise.all([
     getCategoryMargins(),
-    getPlatformFeeKobo((key) =>
+    getFeeBands((key) =>
       db().select().from(tables.platformSettings).where(eq(tables.platformSettings.key, key)).limit(1)
         .then((rows) => rows[0])),
   ]);
@@ -41,6 +42,7 @@ export async function POST(req: Request) {
     marginType: 'fixed', marginFixedKobo: 0, marginPercentBps: 0,
   });
   const qty = order.spec?.qty ?? 1;
+  const platformFeeKobo = platformFeeFor(order.quotedPriceKobo, feeBands);
   const marginKobo = computeMargin(order.quotedPriceKobo, qty, margin);
   const amountPaidKobo = order.quotedPriceKobo + marginKobo + platformFeeKobo;
 

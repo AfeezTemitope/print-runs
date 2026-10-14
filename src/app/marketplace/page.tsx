@@ -3,6 +3,7 @@ import { Suspense } from 'react';
 import { findPrinters } from '@/lib/discovery';
 import { SearchBar } from '@/components/discovery/SearchBar';
 import { PrinterCard } from '@/components/discovery/PrinterCard';
+import { VerifyNotice } from '@/components/discovery/VerifyNotice';
 import { EmptyState } from '@/components/ui/EmptyState';
 
 export const metadata: Metadata = {
@@ -22,6 +23,7 @@ export default async function MarketplacePage({
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6 md:py-14">
+      <VerifyNotice />
       <h1 className="font-display text-4xl font-extrabold tracking-tight text-black sm:text-5xl">
         Discover Lagos <span className="text-blue">printers</span>
       </h1>

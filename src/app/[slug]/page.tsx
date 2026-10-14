@@ -9,6 +9,14 @@ import { fromPriceKobo } from '@/lib/listing-pricing';
 import { listingsFor, subcategoriesFor, tiersForListings } from '@/lib/storefront';
 import { naira } from '@/lib/format';
 import { CodeBadge } from '@/components/ui/CodeBadge';
+import { PortfolioStrip } from '@/components/discovery/PortfolioStrip';
+
+/** Accepts @handle, a bare handle, or a full URL — printers type all three. */
+function instagramUrl(value: string): string {
+  const v = value.trim();
+  if (/^https?:\/\//i.test(v)) return v;
+  return `https://instagram.com/${v.replace(/^@/, '')}`;
+}
 
 /**
  * Public storefront at printruns.ng/[slug] (Module 1, Section 7).
@@ -57,7 +65,7 @@ export default async function StorefrontPage({
   const focusCategory = focus ? getCategory(focus) : undefined;
 
   // The portfolio is generated from listing photos — no separate upload (Section 7).
-  const portfolio = allListings.flatMap((l) => l.photos ?? []).slice(0, 8);
+  const portfolio = allListings.flatMap((l) => l.photos ?? []).slice(0, 24);
 
   const subName = new Map(subs.map((s) => [s.id, s.name]));
   const grouped = new Map<string, typeof listings>();
@@ -85,11 +93,15 @@ export default async function StorefrontPage({
               {[shop.addressCity, shop.addressState].filter(Boolean).join(', ')}
               {shop.ratingCount > 0 && ` · ★ ${shop.ratingAvg.toFixed(1)} (${shop.ratingCount})`}
             </p>
-            {shop.whatsapp && (
-              <a href={`https://wa.me/${shop.whatsapp.replace(/\D/g, '').replace(/^0/, '234')}`}
-                target="_blank" rel="noreferrer"
+            {/*
+              Item #12b: the WhatsApp number is NOT shown publicly. Displaying it invited
+              customers to take the conversation — and the payment — off the platform, which
+              removes every protection the order flow exists to provide. Ops still has it.
+            */}
+            {shop.instagram && (
+              <a href={instagramUrl(shop.instagram)} target="_blank" rel="noreferrer"
                 className="mt-1 inline-block font-display text-[13px] font-bold text-blue hover:underline">
-                {shop.whatsapp} (WhatsApp)
+                {shop.instagram.replace(/^@/, '@')}
               </a>
             )}
           </div>
@@ -99,18 +111,7 @@ export default async function StorefrontPage({
 
       {shop.bio && <p className="mt-4 max-w-2xl whitespace-pre-line text-[15px] leading-relaxed text-black/70">{shop.bio}</p>}
 
-      {portfolio.length > 0 && (
-        <>
-          <h2 className="mt-8 font-display text-lg font-extrabold text-navy">Portfolio</h2>
-          <ul className="mt-3 grid grid-cols-3 gap-2.5 sm:grid-cols-4">
-            {portfolio.map((url) => (
-              <li key={url} className="relative aspect-square overflow-hidden rounded-xl border border-black/12">
-                <Image src={url} alt="" fill sizes="200px" className="object-cover" />
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
+      <PortfolioStrip photos={portfolio} shopName={shop.businessName} />
 
       <div className="mt-8 flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="font-display text-lg font-extrabold text-navy">

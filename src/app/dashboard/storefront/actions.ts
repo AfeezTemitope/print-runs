@@ -24,6 +24,7 @@ export async function saveStorefront(input: {
   addressCity: string;
   addressState: string;
   whatsapp: string;
+  instagram: string;
 }) {
   const shop = await getMyShop();
   if (!shop) return { error: 'Not your shop.' };
@@ -48,6 +49,7 @@ export async function saveStorefront(input: {
     addressCity: input.addressCity.trim(),
     addressState: input.addressState.trim() || null,
     whatsapp: input.whatsapp.trim() || null,
+    instagram: input.instagram.trim() || null,
   }).where(eq(tables.shops.id, shop.id));
 
   revalidatePath('/dashboard/storefront');

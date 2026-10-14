@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
-  LayoutDashboard, ListOrdered, Package, ReceiptText, Wallet, Star, Settings, BadgeCheck, Store, MessageSquare,
+  LayoutDashboard, ListOrdered, Package, ReceiptText, Wallet, Star, Settings, BadgeCheck, Store, MessageSquare, QrCode,
 } from 'lucide-react';
 
 const LINKS = [
@@ -12,6 +12,7 @@ const LINKS = [
   { href: '/dashboard/listings', label: 'Products', icon: Package },
   { href: '/dashboard/quotes', label: 'Quotes', icon: MessageSquare },
   { href: '/dashboard/storefront', label: 'Storefront', icon: Store },
+  { href: '/dashboard/qr', label: 'QR code', icon: QrCode },
   { href: '/dashboard/verify', label: 'Get Verified', icon: BadgeCheck },
   { href: '/dashboard/orders', label: 'Orders', icon: ReceiptText },
   { href: '/dashboard/earnings', label: 'Earnings', icon: Wallet },

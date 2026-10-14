@@ -5,7 +5,7 @@ import { requireAdmin } from '@/lib/admin';
 export const metadata: Metadata = { title: { default: 'Admin', template: '%s · PrintRuns Admin' } };
 
 const NAV = [
-  { href: '/admin', label: 'Overview' },
+  { href: '/admin', label: 'Dashboard' },
   { href: '/admin/orders', label: 'Orders' },
   { href: '/admin/preflight', label: 'Preflight' },
   { href: '/admin/disputes', label: 'Disputes' },

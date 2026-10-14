@@ -4,7 +4,8 @@ import { db, tables } from '@/db';
 import { getSession } from '@/lib/auth';
 import { getCategory } from '@/lib/catalog';
 import { computeListingPrice } from '@/lib/listing-pricing';
-import { computeOrderTotals, getPlatformFeeKobo } from '@/lib/pricing';
+import { computeOrderTotals, getFeeBands } from '@/lib/pricing';
+import { platformFeeFor } from '@/lib/platform-fee';
 import { getCategoryMargins, marginFor } from '@/lib/margins';
 import { LEGAL_VERSION } from '@/lib/legal';
 import { paystackInitialize } from '@/lib/paystack';
@@ -133,9 +134,9 @@ export async function POST(req: Request) {
   }
 
   /* --------------------------------------------------------------- priced */
-  const [margins, platformFeeKobo] = await Promise.all([
+  const [margins, feeBands] = await Promise.all([
     getCategoryMargins(),
-    getPlatformFeeKobo((key) =>
+    getFeeBands((key) =>
       db().select().from(tables.platformSettings).where(eq(tables.platformSettings.key, key)).limit(1)
         .then((rows) => rows[0])),
   ]);
@@ -145,6 +146,7 @@ export async function POST(req: Request) {
   const margin = marginFor(margins, listing.categorySlug, {
     marginType: 'fixed', marginFixedKobo: 0, marginPercentBps: 0,
   });
+  const platformFeeKobo = platformFeeFor(price.totalKobo, feeBands);
   const totals = computeOrderTotals(price.totalKobo, qty, margin, platformFeeKobo);
   // The preflight fee rides on the same charge rather than a second transaction. Zero at
   // launch, so this adds nothing today and needs no flow change when it is switched on.

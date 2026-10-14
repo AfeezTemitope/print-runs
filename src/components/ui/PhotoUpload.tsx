@@ -3,6 +3,7 @@
 import { useRef, useState } from 'react';
 import Image from 'next/image';
 import { ImageUp, Loader2, X } from 'lucide-react';
+import { uploadWithProgress, ProgressBar } from '@/components/ui/UploadProgress';
 
 /**
  * Shared image picker for the two places photos get set: a printer's own product shot and
@@ -20,22 +21,19 @@ export function PhotoUpload({
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
+  const [percent, setPercent] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   async function send(file: File | undefined) {
     if (!file) return;
     setBusy(true);
+    setPercent(0);
     setError(null);
-    const fd = new FormData();
-    fd.append('file', file);
-    fd.append('kind', kind);
     try {
-      const res = await fetch('/api/upload/image', { method: 'POST', body: fd });
-      const json = await res.json();
-      if (!res.ok) setError(json.error ?? 'Upload failed.');
-      else onChange(json.url as string);
-    } catch {
-      setError('Upload failed — check your connection.');
+      const res = await uploadWithProgress(file, '/api/upload/image', { kind }, setPercent);
+      onChange(res.url);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Upload failed.');
     } finally {
       setBusy(false);
       if (input.current) input.current.value = '';
@@ -82,6 +80,7 @@ export function PhotoUpload({
           <span className="font-mono text-[10px] uppercase tracking-widest text-black/45">PNG, JPG or WEBP · max 8MB</span>
         </button>
       )}
+      {busy && <ProgressBar percent={percent} />}
       {error && <p className="mt-1.5 text-xs text-red">{error}</p>}
     </div>
   );

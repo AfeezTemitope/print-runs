@@ -117,6 +117,7 @@ async function main() {
       addressLine1: p.addr, addressCity: p.city, addressState: 'Lagos',
       lat: p.lat, lng: p.lng,
       whatsapp: `0803 000 000${i + 1}`,
+      instagram: `@${p.slug}`,
       bio: 'Quality prints, honest turnaround.',
       // Two verified, two on Tier 1 — so both badge states show in search, which is the
       // founder decision that Tier 1 stays visible without a badge.

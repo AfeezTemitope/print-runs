@@ -7,6 +7,7 @@ import { FileCheck2, PenTool, UploadCloud, X } from 'lucide-react';
 import { naira } from '@/lib/format';
 import { Button } from '@/components/ui/Button';
 import { Field, Input, Select, Textarea } from '@/components/ui/Field';
+import { uploadWithProgress, ProgressBar } from '@/components/ui/UploadProgress';
 
 export type OrderSummary = {
   listingId: string;
@@ -61,6 +62,7 @@ export function OrderClient({ summary }: { summary: OrderSummary }) {
   const [legalAccepted, setLegalAccepted] = useState(false);
 
   const [uploading, setUploading] = useState(false);
+  const [percent, setPercent] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -81,14 +83,16 @@ export function OrderClient({ summary }: { summary: OrderSummary }) {
   async function onFile(f: File | undefined) {
     if (!f) return;
     setUploading(true);
+    setPercent(0);
     setError(null);
-    const fd = new FormData();
-    fd.append('file', f);
-    const res = await fetch('/api/upload', { method: 'POST', body: fd });
-    const json = await res.json();
-    setUploading(false);
-    if (!res.ok) { setError(json.error ?? 'Upload failed.'); return; }
-    setFiles((prev) => [...prev, { url: json.url, name: json.name }].slice(0, 3));
+    try {
+      const res = await uploadWithProgress(f, '/api/upload', {}, setPercent);
+      setFiles((prev) => [...prev, res].slice(0, 3));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Upload failed.');
+    } finally {
+      setUploading(false);
+    }
   }
 
   async function submit() {
@@ -166,6 +170,8 @@ export function OrderClient({ summary }: { summary: OrderSummary }) {
               <span className="font-mono text-[10px] uppercase tracking-widest text-black/45">PDF, AI, CDR, PNG, JPG · CMYK preferred</span>
             </label>
           )}
+
+          {uploading && <ProgressBar percent={percent} label="Uploading your design" />}
 
           {summary.designCode && files.some((f) => f.url === summary.designUrl) && (
             <p className="mt-2 rounded-xl border border-blue/30 bg-blue/5 px-3.5 py-2 text-[13px] text-navy">

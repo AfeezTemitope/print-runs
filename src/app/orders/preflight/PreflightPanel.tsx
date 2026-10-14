@@ -3,6 +3,7 @@
 import { useState, useTransition } from 'react';
 import { AlertTriangle, Clock } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
+import { uploadWithProgress, ProgressBar } from '@/components/ui/UploadProgress';
 import { resubmitFile, overridePreflight } from './actions';
 
 export type PanelState = {
@@ -17,6 +18,7 @@ export type PanelState = {
 export function PreflightPanel({ state }: { state: PanelState }) {
   const [pending, start] = useTransition();
   const [uploading, setUploading] = useState(false);
+  const [percent, setPercent] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [accepted, setAccepted] = useState(false);
@@ -24,17 +26,19 @@ export function PreflightPanel({ state }: { state: PanelState }) {
   async function onFile(f: File | undefined) {
     if (!f) return;
     setUploading(true);
+    setPercent(0);
     setError(null);
-    const fd = new FormData();
-    fd.append('file', f);
-    const res = await fetch('/api/upload', { method: 'POST', body: fd });
-    const json = await res.json();
-    setUploading(false);
-    if (!res.ok) { setError(json.error ?? 'Upload failed.'); return; }
-    start(async () => {
-      const out = await resubmitFile(state.orderId, json.url, json.name);
-      if (out?.error) setError(out.error);
-    });
+    try {
+      const res = await uploadWithProgress(f, '/api/upload', {}, setPercent);
+      start(async () => {
+        const out = await resubmitFile(state.orderId, res.url, res.name);
+        if (out?.error) setError(out.error);
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Upload failed.');
+    } finally {
+      setUploading(false);
+    }
   }
 
   if (state.reviewStatus === 'pending') {
@@ -110,6 +114,7 @@ export function PreflightPanel({ state }: { state: PanelState }) {
         </div>
       )}
 
+      {uploading && <ProgressBar percent={percent} label="Uploading your new file" />}
       <p className="mt-2 text-xs text-black/50">Re-checks are free, however many times you resubmit.</p>
       {error && <p className="mt-2 text-sm text-red">{error}</p>}
     </div>

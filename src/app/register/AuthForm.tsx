@@ -68,6 +68,7 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
     // the studio they still have to build, everyone else in the catalogue.
     const home = json.role === 'printer' ? '/dashboard'
       : json.role === 'designer' ? '/studio'
+      : json.role === 'admin' ? '/admin'
       : '/products';
     router.push(next ?? home);
     router.refresh();

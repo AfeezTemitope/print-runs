@@ -13,6 +13,7 @@ export type StorefrontData = {
   logoUrl: string; bannerUrl: string;
   addressLine1: string; addressCity: string; addressState: string;
   whatsapp: string;
+  instagram: string;
   listingCount: number;
 };
 
@@ -25,6 +26,7 @@ export function StorefrontClient({ data, siteUrl }: { data: StorefrontData; site
   const [addressCity, setAddressCity] = useState(data.addressCity);
   const [addressState, setAddressState] = useState(data.addressState);
   const [whatsapp, setWhatsapp] = useState(data.whatsapp);
+  const [instagram, setInstagram] = useState(data.instagram);
 
   const [slug, setSlug] = useState(data.slug);
   const [pending, start] = useTransition();
@@ -85,7 +87,12 @@ export function StorefrontClient({ data, siteUrl }: { data: StorefrontData; site
           </Field>
         </div>
 
-        <Field label="WhatsApp number (optional)" hint="Shown publicly — it's how most customers will reach you.">
+        <Field label="Instagram (optional)" hint="Shown on your storefront, so customers can see more of your work.">
+          <Input value={instagram} onChange={(e) => { setInstagram(e.target.value); setSaved(false); }} placeholder="@yourshop" />
+        </Field>
+
+        <Field label="WhatsApp number (optional)"
+          hint="For PrintRuns only — we use it to reach you about orders and delivery. It is never shown to customers.">
           <Input value={whatsapp} onChange={(e) => { setWhatsapp(e.target.value); setSaved(false); }} placeholder="0803 000 0000" />
         </Field>
 
@@ -97,7 +104,7 @@ export function StorefrontClient({ data, siteUrl }: { data: StorefrontData; site
             const res = await saveStorefront({
               businessName, bio,
               logoUrl: logoUrl ?? '', bannerUrl: bannerUrl ?? '',
-              addressLine1, addressCity, addressState, whatsapp,
+              addressLine1, addressCity, addressState, whatsapp, instagram,
             });
             if (res?.error) setError(res.error);
             else { setSaved(true); if (res && 'slug' in res && res.slug) setSlug(res.slug); }

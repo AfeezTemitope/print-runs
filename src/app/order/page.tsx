@@ -5,7 +5,8 @@ import { and, eq } from 'drizzle-orm';
 import { db, tables } from '@/db';
 import { getSession } from '@/lib/auth';
 import { computeListingPrice } from '@/lib/listing-pricing';
-import { computeOrderTotals, getPlatformFeeKobo } from '@/lib/pricing';
+import { computeOrderTotals, getFeeBands } from '@/lib/pricing';
+import { platformFeeFor } from '@/lib/platform-fee';
 import { getCategoryMargins, marginFor } from '@/lib/margins';
 import { OrderClient, type OrderSummary } from './OrderClient';
 
@@ -47,15 +48,16 @@ export default async function OrderPage({
   // The URL can say quote, but an unpriceable spec is a quote whatever the URL says.
   const isQuote = one(sp.quote) === '1' || !price.ok;
 
-  const [margins, platformFeeKobo] = await Promise.all([
+  const [margins, feeBands] = await Promise.all([
     getCategoryMargins(),
-    getPlatformFeeKobo((key) =>
+    getFeeBands((key) =>
       db().select().from(tables.platformSettings).where(eq(tables.platformSettings.key, key)).limit(1)
         .then((rows) => rows[0])),
   ]);
   const margin = marginFor(margins, listing.categorySlug, {
     marginType: 'fixed', marginFixedKobo: 0, marginPercentBps: 0,
   });
+  const platformFeeKobo = price.ok ? platformFeeFor(price.totalKobo, feeBands) : 0;
   const totals = price.ok
     ? computeOrderTotals(price.totalKobo, qty, margin, platformFeeKobo)
     : { printerBaseKobo: 0, marginKobo: 0, sellingPriceKobo: 0, platformFeeKobo: 0, amountPaidKobo: 0 };

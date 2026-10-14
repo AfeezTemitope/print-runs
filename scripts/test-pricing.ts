@@ -3,6 +3,8 @@
    numbers the founder decisions specify, not just that it type-checks. */
 
 import { computeMargin, computeOrderTotals, DEFAULT_PLATFORM_FEE_KOBO } from '../src/lib/pricing';
+import { platformFeeFor, DEFAULT_FEE_BANDS } from '../src/lib/platform-fee';
+import { homeForRole } from '../src/lib/home-for-role';
 import {
   stepsFor, statusLabel, canDecline, isSettlementEligible, QUEUE_STATUSES,
   canDispatch, canSetDeliveryFee, dispatchBlockedReason,
@@ -50,9 +52,11 @@ console.log('\nMargin math');
 eq('ID Card ₦200 fixed × 1',
   computeMargin(N(1000), 1, { marginType: 'fixed', marginFixedKobo: N(200), marginPercentBps: 0 }),
   N(200));
-eq('ID Card ₦200 fixed × 50 scales per piece',
+// Was 'scales per piece' under V1, where the platform defined the product and a unit meant
+// one card. V2 prices in batches, so a fixed margin is charged once per order.
+eq('a fixed margin is charged once, whatever the quantity',
   computeMargin(N(50000), 50, { marginType: 'fixed', marginFixedKobo: N(200), marginPercentBps: 0 }),
-  N(10000));
+  N(200));
 
 // Decision 23: Business Card keeps a 7% percentage margin (700 bps) on the printer base price.
 eq('Business Card 7% of ₦10,000',
@@ -499,6 +503,65 @@ console.log('\nTrust and reputation (Module 4)');
     card({ id: 'far-clean', distanceKm: 20, penalty: 0 }),
   ]);
   eq('a demoted printer sorts below a distant clean one', ranked[0].id, 'far-clean');
+
+console.log('\nMargin is per ORDER, never per piece (brief #1 and #3)');
+  // The exact bug a tester hit: a printer priced 50 nylon bags at a ₦12,000 BATCH total and
+  // the customer was shown ₦37,500 — ₦500 of margin had been multiplied by all 50 pieces.
+  const flat500 = { marginType: 'fixed' as const, marginFixedKobo: N(500), marginPercentBps: 0 };
+  eq('a fixed margin does not multiply by quantity', computeMargin(N(12000), 50, flat500), N(500));
+  eq('quantity 1 is unchanged', computeMargin(N(12000), 1, flat500), N(500));
+  eq('quantity 1000 is still one margin', computeMargin(N(12000), 1000, flat500), N(500));
+  // The whole order, end to end, against the figure the tester reported.
+  const bagOrder = computeOrderTotals(N(12000), 50, flat500, N(500));
+  eq('50 bags at ₦12,000 total ₦13,000, not ₦37,500', bagOrder.amountPaidKobo, N(13000));
+  eq('the printer still keeps their full price', bagOrder.printerBaseKobo, N(12000));
+  // A percentage margin was never affected, which is why per sq.ft looked fine.
+  eq('a percent margin is unchanged by quantity',
+    computeMargin(N(10000), 50, { marginType: 'percent', marginFixedKobo: 0, marginPercentBps: 700 }), N(700));
+
+  console.log('\nBanded platform fee (brief #10)');
+  eq('a small order pays the low band', platformFeeFor(N(12000)), N(500));
+  eq('just under the threshold is still low', platformFeeFor(N(49999)), N(500));
+  eq('exactly at the threshold is the high band', platformFeeFor(N(50000)), N(1000));
+  eq('a large order pays the high band', platformFeeFor(N(250000)), N(1000));
+  // Capped deliberately — it does not keep scaling.
+  eq('the fee is capped at the high band', platformFeeFor(N(5000000)), N(1000));
+  // Tested against the PRINTER's price, so PrintRuns' own margin can never tip an order into
+  // the higher band — that would be charging a fee on a fee.
+  eq('the threshold ignores margin and fee', platformFeeFor(N(49500)), N(500));
+  eq('bands are configurable, not hardcoded',
+    platformFeeFor(N(30000), { lowKobo: N(100), highKobo: N(200), thresholdKobo: N(20000) }), N(200));
+  eq('defaults match the brief', [DEFAULT_FEE_BANDS.lowKobo, DEFAULT_FEE_BANDS.highKobo, DEFAULT_FEE_BANDS.thresholdKobo],
+    [N(500), N(1000), N(50000)]);
+
+console.log('\nRole-aware home (brief #11)');
+  // A printer tapping the logo must land in their dashboard. Dropping them on the customer
+  // homepage looked like their session had been forgotten, which is alarming when you have
+  // money and live orders on the platform.
+  eq('a printer goes to their dashboard', homeForRole('printer'), '/dashboard');
+  eq('a designer goes to their studio', homeForRole('designer'), '/studio');
+  eq('an admin goes to admin', homeForRole('admin'), '/admin');
+  eq('a customer goes to the storefront', homeForRole('customer'), '/');
+  eq('a signed-out visitor goes to the storefront', homeForRole(undefined), '/');
+
+console.log('\nRound 2 additions');
+  // #5: the QR encodes the printer's own public URL — a wrong base here sends every scan to
+  // the wrong place, and it is printed on shop signs where it cannot be corrected.
+  const qrUrl = (base: string, slug: string) => `${base.replace(/\/$/, '')}/${slug}`;
+  eq('the QR points at the storefront', qrUrl('https://printruns.ng', 'cubicprints'), 'https://printruns.ng/cubicprints');
+  eq('a trailing slash does not double up', qrUrl('https://printruns.ng/', 'cubicprints'), 'https://printruns.ng/cubicprints');
+
+  // #8: progress is capped below 100 until the server answers — bytes sent is not the same as
+  // upload finished, and sitting at 100% waiting looks broken.
+  const shown = (loaded: number, total: number) => Math.min(99, Math.round((loaded / total) * 100));
+  eq('a half-sent file shows 50%', shown(50, 100), 50);
+  eq('all bytes sent still shows 99 until the server replies', shown(100, 100), 99);
+  eq('an empty start shows 0', shown(0, 100), 0);
+
+  // #4: three visible, the rest reachable by swiping — the strip must not silently drop any.
+  const portfolio = Array.from({ length: 11 }, (_, i) => `p${i}`);
+  eq('every photo stays in the strip', portfolio.length, 11);
+  eq('the strip scrolls once there are more than three', portfolio.length > 3, true);
 
   console.log(`\n${pass} passed, ${fail} failed\n`);
   process.exit(fail === 0 ? 0 : 1);

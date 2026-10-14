@@ -117,7 +117,10 @@ export const shops = pgTable('shops', {
   openingHours: text('opening_hours'),
   // Shown publicly on the storefront (Module 1, Section 3 step 2) — optional but recommended,
   // because it is how Lagos customers actually expect to reach a printer.
+  // Kept for ops to reach the printer. NOT shown publicly — see item #12b.
   whatsapp: text('whatsapp'),
+  /** Shown publicly in place of WhatsApp: a shop window, not a private line. */
+  instagram: text('instagram'),
   /**
    * Two-tier verification (Module 4 §1, brought forward because discovery needs it).
    * 1 = Basic, auto-approved on signup, live but no badge.

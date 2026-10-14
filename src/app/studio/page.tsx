@@ -7,6 +7,12 @@ import { StudioClient, type StudioData } from './StudioClient';
 
 export const metadata: Metadata = { title: 'My studio' };
 
+/** Same greeting as the printer dashboard, in Lagos time — see the note there. */
+function greeting(): string {
+  const h = Number(new Intl.DateTimeFormat('en-NG', { timeZone: 'Africa/Lagos', hour: 'numeric', hour12: false }).format(new Date()));
+  return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
+}
+
 export default async function StudioPage() {
   const session = await getSession();
   if (!session) redirect('/login?next=/studio');
@@ -39,7 +45,9 @@ export default async function StudioPage() {
     <div className="mx-auto max-w-4xl px-4 py-10 sm:px-6">
       <div className="mb-7 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="mb-1 font-display text-3xl font-extrabold tracking-tight text-black">My studio</h1>
+          <h1 className="mb-1 font-display text-3xl font-extrabold tracking-tight text-black">
+            {studio ? `${greeting()}, ${studio.displayName.split(' ')[0]}.` : 'My studio'}
+          </h1>
           <p className="text-black/60">Your public profile, portfolio and prices.</p>
         </div>
         <div className="flex gap-2">
