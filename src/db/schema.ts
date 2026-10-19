@@ -138,6 +138,18 @@ export const shops = pgTable('shops', {
   subscriptionAutoRenew: boolean('subscription_auto_renew').notNull().default(true),
   /** Paystack reference for the most recent subscription payment, for reconciliation. */
   subscriptionRef: text('subscription_ref'),
+  /**
+   * Payout account (Round 3b). accountName is what Paystack's resolve endpoint returned, NOT
+   * what the printer typed — it is shown back to them so a wrong digit is caught before any
+   * money is sent to a stranger's account.
+   */
+  bankCode: text('bank_code'),
+  bankName: text('bank_name'),
+  accountNumber: text('account_number'),
+  accountName: text('account_name'),
+  bankVerifiedAt: timestamp('bank_verified_at', { withTimezone: true }),
+  /** Paystack transfer recipient. Cleared whenever the bank details change. */
+  paystackRecipientCode: text('paystack_recipient_code'),
   ratingAvg: doublePrecision('rating_avg').notNull().default(0),
   ratingCount: integer('rating_count').notNull().default(0),
   isActive: boolean('is_active').notNull().default(true),
@@ -409,6 +421,43 @@ export const designRevisionCharges = pgTable('design_revision_charges', {
 }, (t) => [
   uniqueIndex('design_revision_ref_uq').on(t.reference),
   index('design_revision_order_idx').on(t.designOrderId, t.paymentStatus),
+]);
+
+/* ------------------------------------------------------------------ */
+/* Payouts (Round 3b)                                                  */
+/* ------------------------------------------------------------------ */
+
+export const payoutKind = pgEnum('payout_kind', ['settlement', 'advance']);
+export const payoutState = pgEnum('payout_state', ['due', 'processing', 'paid', 'failed']);
+
+/**
+ * Money owed to a printer, and what happened to it.
+ *
+ * Kept as its own ledger rather than a flag on the order because a single order can now pay
+ * out twice — a Pro advance, then the balance — and each of those has its own transfer, its
+ * own failure and its own retry. The unique index on (order, kind) is the guarantee that no
+ * order is ever paid out twice for the same thing, whatever retries or races happen.
+ */
+export const payouts = pgTable('payouts', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  shopId: uuid('shop_id').notNull().references(() => shops.id, { onDelete: 'restrict' }),
+  orderId: uuid('order_id').notNull().references(() => orders.id, { onDelete: 'restrict' }),
+  kind: payoutKind('kind').notNull(),
+  amountKobo: integer('amount_kobo').notNull(),
+  state: payoutState('state').notNull().default('due'),
+  /** Our reference, unique per payout — what makes a retried transfer safe. */
+  reference: text('reference').notNull(),
+  transferCode: text('transfer_code'),
+  failureReason: text('failure_reason'),
+  /** 'auto' when Paystack sent it, 'manual' when an admin marked a bank transfer as done. */
+  paidBy: text('paid_by'),
+  paidAt: timestamp('paid_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex('payout_order_kind_uq').on(t.orderId, t.kind),
+  uniqueIndex('payout_reference_uq').on(t.reference),
+  index('payout_state_idx').on(t.state, t.createdAt),
+  index('payout_shop_idx').on(t.shopId, t.createdAt),
 ]);
 
 /* ------------------------------------------------------------------ */

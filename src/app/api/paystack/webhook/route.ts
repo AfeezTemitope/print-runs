@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import crypto from 'node:crypto';
+import { eq } from 'drizzle-orm';
+import { db, tables } from '@/db';
 import { settlePayment } from '@/lib/settle';
 
 /** Paystack webhook — HMAC-SHA512 signature check on the raw body, then idempotent settle. */
@@ -19,9 +21,37 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
   }
 
-  const event = JSON.parse(raw) as { event: string; data?: { reference?: string } };
+  const event = JSON.parse(raw) as {
+    event: string;
+    data?: { reference?: string; reason?: string; gateway_response?: string };
+  };
+
   if (event.event === 'charge.success' && event.data?.reference) {
     await settlePayment(event.data.reference);
   }
+
+  /**
+   * Transfer outcomes (Round 3b). A payout is only 'paid' once Paystack says the money
+   * actually arrived — the transfer request succeeding means it was accepted, not delivered.
+   * A reversal sends it back to 'failed' so it shows up for an admin to retry, rather than
+   * sitting as paid while the printer never received it.
+   */
+  const ref = event.data?.reference;
+  if (ref && ref.startsWith('PRP-')) {
+    if (event.event === 'transfer.success') {
+      await db().update(tables.payouts)
+        .set({ state: 'paid', paidBy: 'auto', paidAt: new Date(), failureReason: null })
+        .where(eq(tables.payouts.reference, ref));
+    } else if (event.event === 'transfer.failed' || event.event === 'transfer.reversed') {
+      await db().update(tables.payouts)
+        .set({
+          state: 'failed',
+          failureReason: event.data?.reason ?? event.data?.gateway_response
+            ?? (event.event === 'transfer.reversed' ? 'Transfer reversed by the bank.' : 'Transfer failed.'),
+        })
+        .where(eq(tables.payouts.reference, ref));
+    }
+  }
+
   return NextResponse.json({ received: true });
 }

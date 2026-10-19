@@ -148,6 +148,13 @@
       "when": 1789580717045,
       "tag": "0020_v2_subscriptions",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1789580718045,
+      "tag": "0021_v2_payouts",
+      "breakpoints": true
     }
   ]
 }

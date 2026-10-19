@@ -8,6 +8,10 @@ import { naira } from '@/lib/format';
 import { QUEUE_STATUSES, statusLabel } from '@/lib/status';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { QueueActions } from './QueueActions';
+import { AdvanceButton } from './AdvanceButton';
+import { getTierConfig } from '@/lib/tier-config';
+import { effectiveTier } from '@/lib/subscriptions';
+import { advanceAmount, payoutsFor } from '@/lib/payouts';
 
 export const metadata: Metadata = { title: 'Job queue' };
 
@@ -22,6 +26,16 @@ export default async function QueuePage() {
     eq(tables.orders.shopId, shop.id),
     inArray(tables.orders.status, QUEUE_STATUSES),
   )).orderBy(asc(tables.orders.createdAt));
+
+  // Pro only. Looked up once for the whole queue rather than per job.
+  const tierConfig = await getTierConfig();
+  const allowsAdvance = tierConfig[effectiveTier(shop)].materialAdvance;
+  const advanced = new Set(
+    allowsAdvance
+      ? (await payoutsFor(jobs.map((j) => j.id))).filter((p) => p.kind === 'advance').map((p) => p.orderId)
+      : [],
+  );
+  const ACCEPTED = ['printer_assigned', 'printing_in_progress', 'printing_completed', 'ready_for_dispatch'];
 
   return (
     <div>
@@ -81,6 +95,13 @@ export default async function QueuePage() {
                   <p className="mb-2 rounded-xl border border-red/30 bg-red/5 px-3.5 py-2 text-[13px] font-semibold text-red">
                     ⚠ Customer overrode preflight check — file may have issues.
                   </p>
+                )}
+                {allowsAdvance && ACCEPTED.includes(job.status) && job.printerBaseKobo != null && (
+                  <AdvanceButton
+                    orderId={job.id}
+                    amountKobo={advanceAmount(job.printerBaseKobo)}
+                    already={advanced.has(job.id)}
+                  />
                 )}
                 <QueueActions
                   orderId={job.id}

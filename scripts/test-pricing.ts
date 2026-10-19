@@ -9,6 +9,7 @@ import {
   DEFAULT_TIERS, effectiveTier, withinOrderCap, tierNeededFor,
   needsRenewalNotice, daysUntil, BILLING_CYCLE_DAYS, RENEWAL_NOTICE_DAYS,
 } from '../src/lib/subscriptions';
+import { advanceAmount, settlementAmount, canRequestAdvance, ADVANCE_SHARE } from '../src/lib/payouts';
 import {
   stepsFor, statusLabel, canDecline, isSettlementEligible, QUEUE_STATUSES,
   canDispatch, canSetDeliveryFee, dispatchBlockedReason,
@@ -608,6 +609,35 @@ console.log('\nSubscription tiers');
   eq('no notice once it has lapsed', needsRenewalNotice(past), false);
   eq('the notice window is 7 days', RENEWAL_NOTICE_DAYS, 7);
   eq('days remaining counts down', (daysUntil(new Date(Date.now() + 5 * 86_400_000)) ?? 0) <= 5, true);
+
+console.log('\nPayout amounts (brief #9)');
+  // The printer receives their own price exactly once. Across an advance and a balance it must
+  // add up to 100% — never 150%, which is what paying both in full would do.
+  eq('the advance is half', ADVANCE_SHARE, 0.5);
+  eq('half of ₦12,000 is ₦6,000', advanceAmount(N(12000)), N(6000));
+  // An odd kobo is rounded DOWN, so advance + balance can never exceed the price.
+  eq('an odd amount rounds the advance down', advanceAmount(1001), 500);
+  eq('with no advance the full price is owed', settlementAmount(N(12000), 0), N(12000));
+  eq('a paid advance is deducted', settlementAmount(N(12000), N(6000)), N(6000));
+  const price = 1001;
+  eq('advance + balance is exactly the price, never more',
+    advanceAmount(price) + settlementAmount(price, advanceAmount(price)), price);
+  eq('an over-advanced order owes nothing, not a negative', settlementAmount(N(1000), N(5000)), 0);
+
+  console.log('\nWho may request an advance');
+  const okAdvance = { tierAllowsAdvance: true, status: 'printing_in_progress', paymentStatus: 'paid', disputedAt: null, hasAdvance: false };
+  eq('a pro printer on an accepted, paid job may', canRequestAdvance(okAdvance).ok, true);
+  eq('not on a lower plan', canRequestAdvance({ ...okAdvance, tierAllowsAdvance: false }).ok, false);
+  // Brief: "Requires the job to be accepted first."
+  eq('not before the job is accepted', canRequestAdvance({ ...okAdvance, status: 'order_received' }).ok, false);
+  eq('not while the file is still being checked', canRequestAdvance({ ...okAdvance, status: 'paused' }).ok, false);
+  eq('not after delivery — settlement handles that', canRequestAdvance({ ...okAdvance, status: 'delivered' }).ok, false);
+  eq('not on an unpaid order', canRequestAdvance({ ...okAdvance, paymentStatus: 'unpaid' }).ok, false);
+  eq('not while disputed', canRequestAdvance({ ...okAdvance, disputedAt: new Date() }).ok, false);
+  eq('never twice', canRequestAdvance({ ...okAdvance, hasAdvance: true }).ok, false);
+  // Every refusal must say why, or the printer is left staring at a button that did nothing.
+  const refused = canRequestAdvance({ ...okAdvance, status: 'order_received' });
+  eq('a refusal explains itself', !refused.ok && refused.reason.length > 10, true);
 
   console.log(`\n${pass} passed, ${fail} failed\n`);
   process.exit(fail === 0 ? 0 : 1);
