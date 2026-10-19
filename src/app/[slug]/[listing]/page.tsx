@@ -4,6 +4,8 @@ import Link from 'next/link';
 import { and, eq } from 'drizzle-orm';
 import { db, tables } from '@/db';
 import { isReservedSlug } from '@/lib/catalog';
+import { getTierConfig } from '@/lib/tier-config';
+import { effectiveTier } from '@/lib/subscriptions';
 import { ListingDetail, type DetailListing, type DetailTier } from './ListingDetail';
 
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
@@ -55,6 +57,9 @@ export default async function ListingPage({
   const { shop, listing, tiers } = found;
   const design = one((await searchParams).design);
 
+  const tierConfig = await getTierConfig();
+  const orderCapKobo = tierConfig[effectiveTier(shop)].orderCapKobo;
+
   return (
     <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
       <Link href={`/${shop.slug}`} className="font-display text-[13px] font-bold text-black/45 hover:text-blue">
@@ -85,6 +90,7 @@ export default async function ListingPage({
             ratingCount: shop.ratingCount,
           }}
           designCode={design}
+          orderCapKobo={orderCapKobo}
         />
       </div>
     </div>

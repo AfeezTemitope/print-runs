@@ -37,12 +37,18 @@ export type DetailShop = {
  * is the shared engine, so what they watch here is what the server charges.
  */
 export function ListingDetail({
-  listing, tiers, shop, designCode,
+  listing, tiers, shop, designCode, orderCapKobo,
 }: {
   listing: DetailListing;
   tiers: DetailTier[];
   shop: DetailShop;
   designCode?: string;
+  /**
+   * The printer's subscription order cap. Shown on the controls rather than enforced only at
+   * checkout: a customer who picks 1,000 and is turned away at the last step has wasted their
+   * time, and it looks like the platform is broken rather than the printer being capped.
+   */
+  orderCapKobo?: number | null;
 }) {
   const router = useRouter();
   const sorted = useMemo(() => sortTiers(tiers as never), [tiers]) as DetailTier[];
@@ -70,6 +76,8 @@ export function ListingDetail({
       height: Number(height) || undefined,
     },
   );
+
+  const overCap = orderCapKobo != null && price.ok && price.totalKobo > orderCapKobo;
 
   const overTop = listing.pricingMode === 'tier'
     && needsCustomQuantity(listing as never, sorted as never, effectiveQty);
@@ -139,15 +147,22 @@ export function ListingDetail({
             <>
               <span className="mb-2.5 block font-display text-[13px] font-bold text-navy">Select quantity</span>
               <div className="flex flex-wrap gap-2">
-                {sorted.map((t) => (
-                  <button key={t.id}
-                    onClick={() => { setQty(t.quantity); setCustomQty(''); }}
-                    className={`rounded-pill border px-4 py-2 font-mono text-[13px] font-bold ${
-                      !customQty && qty === t.quantity ? 'border-blue bg-blue text-white' : 'border-black/20 text-navy hover:border-black/45'
-                    }`}>
-                    {t.quantity.toLocaleString()} pcs
-                  </button>
-                ))}
+                {sorted.map((t) => {
+                  const blocked = orderCapKobo != null && t.priceKobo > orderCapKobo;
+                  return (
+                    <button key={t.id}
+                      onClick={() => { if (!blocked) { setQty(t.quantity); setCustomQty(''); } }}
+                      disabled={blocked}
+                      title={blocked ? `${shop.businessName} can't take orders this size yet` : undefined}
+                      className={`rounded-pill border px-4 py-2 font-mono text-[13px] font-bold ${
+                        blocked ? 'cursor-not-allowed border-dashed border-black/15 text-black/30'
+                          : !customQty && qty === t.quantity ? 'border-blue bg-blue text-white'
+                          : 'border-black/20 text-navy hover:border-black/45'
+                      }`}>
+                      {t.quantity.toLocaleString()} pcs
+                    </button>
+                  );
+                })}
                 <Input inputMode="numeric" value={customQty} placeholder="Other"
                   onChange={(e) => setCustomQty(e.target.value.replace(/\D/g, ''))}
                   aria-label="Custom quantity" className="!w-28" />
@@ -190,7 +205,17 @@ export function ListingDetail({
             ? <p className="mt-0.5 text-right font-mono text-[11px] text-black/45">{price.detail}</p>
             : <p className="mt-0.5 text-right font-mono text-[11px] text-black/45">{price.reason}</p>}
 
-          {price.ok ? (
+          {overCap ? (
+            <>
+              <Button className="mt-4 w-full" variant="secondary" onClick={() => order(true)}>
+                Request a quote <span aria-hidden>→</span>
+              </Button>
+              <p className="mt-2 text-center text-xs text-black/50">
+                {shop.businessName} can&apos;t take orders this size through the platform yet.
+                Ask them for a quote, or choose a smaller quantity.
+              </p>
+            </>
+          ) : price.ok ? (
             <Button className="mt-4 w-full" onClick={() => order(false)}>
               Order now <span aria-hidden>→</span>
             </Button>

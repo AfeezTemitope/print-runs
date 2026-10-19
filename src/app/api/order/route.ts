@@ -6,6 +6,8 @@ import { getCategory } from '@/lib/catalog';
 import { computeListingPrice } from '@/lib/listing-pricing';
 import { computeOrderTotals, getFeeBands } from '@/lib/pricing';
 import { platformFeeFor } from '@/lib/platform-fee';
+import { getTierConfig } from '@/lib/tier-config';
+import { effectiveTier, withinOrderCap } from '@/lib/subscriptions';
 import { getCategoryMargins, marginFor } from '@/lib/margins';
 import { LEGAL_VERSION } from '@/lib/legal';
 import { paystackInitialize } from '@/lib/paystack';
@@ -131,6 +133,22 @@ export async function POST(req: Request) {
       preflightRequested: wantsPreflight,
     });
     return NextResponse.json({ ok: true, quote: true, code });
+  }
+
+  /**
+   * Subscription order cap. Enforced here, not only in the UI: the listing screen greys out
+   * tiers a printer cannot take, but a posted request must not be able to walk past it.
+   *
+   * A quote is exempt — the printer may well be able to do the job, they just cannot take it
+   * through the platform at their current tier, and turning the customer away entirely helps
+   * nobody.
+   */
+  const tierConfig = await getTierConfig();
+  const tier = tierConfig[effectiveTier(shop)];
+  if (!withinOrderCap(tier, price.totalKobo)) {
+    return NextResponse.json({
+      error: `${shop.businessName} can't take orders this size through PrintRuns yet. Request a quote, or choose a smaller quantity.`,
+    }, { status: 400 });
   }
 
   /* --------------------------------------------------------------- priced */

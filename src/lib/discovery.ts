@@ -3,6 +3,8 @@ import { db, tables } from '@/db';
 import { fromPriceKobo } from '@/lib/listing-pricing';
 import { getCategory } from '@/lib/catalog';
 import { visibilityPenalty } from '@/lib/trust';
+import { effectiveTier } from '@/lib/subscriptions';
+import { DEFAULT_TIERS } from '@/lib/subscriptions';
 
 /**
  * Customer-facing printer discovery (Module 2, Sections 3 and 4).
@@ -32,6 +34,12 @@ export type PrinterCard = {
    * sees better-performing printers first.
    */
   penalty: number;
+  /**
+   * Paid tiers rank above free ones (brief: "Priority in search results"). Applied AFTER the
+   * dispute penalty deliberately — paying for Growth must not lift a printer back above
+   * someone with a clean record, or the ranking stops meaning anything to customers.
+   */
+  priority: number;
 };
 
 /** Straight-line distance. Good enough to order a list by; not a routing estimate. */
@@ -52,8 +60,10 @@ export function haversineKm(a: { lat: number; lng: number }, b: { lat: number; l
  */
 export function sortByDistance(cards: PrinterCard[]): PrinterCard[] {
   return [...cards].sort((a, b) => {
-    // Demoted printers sort below everyone else regardless of how close they are.
+    // Demoted printers sort below everyone else regardless of how close they are, and a paid
+    // tier never buys its way back past that.
     if (a.penalty !== b.penalty) return a.penalty - b.penalty;
+    if (a.priority !== b.priority) return b.priority - a.priority;
     if (a.distanceKm === null && b.distanceKm === null) return b.ratingAvg - a.ratingAvg;
     if (a.distanceKm === null) return 1;
     if (b.distanceKm === null) return -1;
@@ -136,6 +146,7 @@ export async function findPrinters(opts: DiscoveryOptions = {}): Promise<Printer
         .slice(0, 3),
       fromKobo: prices.length ? Math.min(...prices) : null,
       penalty: visibilityPenalty(lostByShop.get(shop.id) ?? 0),
+      priority: DEFAULT_TIERS[effectiveTier(shop)].searchPriority,
       distanceKm: opts.origin && shop.lat != null && shop.lng != null
         ? haversineKm(opts.origin, { lat: shop.lat, lng: shop.lng })
         : null,

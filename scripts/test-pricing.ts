@@ -6,6 +6,10 @@ import { computeMargin, computeOrderTotals, DEFAULT_PLATFORM_FEE_KOBO } from '..
 import { platformFeeFor, DEFAULT_FEE_BANDS } from '../src/lib/platform-fee';
 import { homeForRole } from '../src/lib/home-for-role';
 import {
+  DEFAULT_TIERS, effectiveTier, withinOrderCap, tierNeededFor,
+  needsRenewalNotice, daysUntil, BILLING_CYCLE_DAYS, RENEWAL_NOTICE_DAYS,
+} from '../src/lib/subscriptions';
+import {
   stepsFor, statusLabel, canDecline, isSettlementEligible, QUEUE_STATUSES,
   canDispatch, canSetDeliveryFee, dispatchBlockedReason,
 } from '../src/lib/status';
@@ -392,7 +396,7 @@ console.log('\nDiscovery sorting (Module 2)');
   const card = (over: Partial<PrinterCard>): PrinterCard => ({
     id: 'x', slug: 'x', code: 'LB-001', businessName: 'X', bannerUrl: null, logoUrl: null,
     area: 'Lagos', verified: false, ratingAvg: 0, ratingCount: 0, categories: [],
-    fromKobo: null, distanceKm: null, penalty: 0, ...over,
+    fromKobo: null, distanceKm: null, penalty: 0, priority: 0, ...over,
   });
 
   // Lagos check: Yaba to Lekki is roughly 15km straight line.
@@ -562,6 +566,48 @@ console.log('\nRound 2 additions');
   const portfolio = Array.from({ length: 11 }, (_, i) => `p${i}`);
   eq('every photo stays in the strip', portfolio.length, 11);
   eq('the strip scrolls once there are more than three', portfolio.length > 3, true);
+
+console.log('\nSubscription tiers');
+  eq('free caps orders at ₦20,000', DEFAULT_TIERS.free.orderCapKobo, N(20000));
+  eq('growth caps at ₦150,000', DEFAULT_TIERS.growth.orderCapKobo, N(150000));
+  eq('pro is uncapped', DEFAULT_TIERS.pro.orderCapKobo, null);
+  eq('growth costs ₦7,500 per cycle', DEFAULT_TIERS.growth.priceKobo, N(7500));
+  eq('pro costs ₦12,500 per cycle', DEFAULT_TIERS.pro.priceKobo, N(12500));
+  eq('the cycle is two months', BILLING_CYCLE_DAYS, 60);
+  eq('retention is 2 / 30 / 90 days',
+    [DEFAULT_TIERS.free.fileRetentionDays, DEFAULT_TIERS.growth.fileRetentionDays, DEFAULT_TIERS.pro.fileRetentionDays],
+    [2, 30, 90]);
+  // Only Pro gets the advance — it moves real money before delivery, so it is the one feature
+  // that must never leak to a lower tier by accident.
+  eq('only pro gets the material advance',
+    [DEFAULT_TIERS.free.materialAdvance, DEFAULT_TIERS.growth.materialAdvance, DEFAULT_TIERS.pro.materialAdvance],
+    [false, false, true]);
+
+  console.log('\nOrder cap enforcement');
+  eq('a ₦12,000 job fits on free', withinOrderCap(DEFAULT_TIERS.free, N(12000)), true);
+  eq('exactly at the cap is allowed', withinOrderCap(DEFAULT_TIERS.free, N(20000)), true);
+  eq('a naira over the cap is not', withinOrderCap(DEFAULT_TIERS.free, N(20001)), false);
+  eq('growth takes what free cannot', withinOrderCap(DEFAULT_TIERS.growth, N(100000)), true);
+  eq('pro takes anything', withinOrderCap(DEFAULT_TIERS.pro, N(50000000)), true);
+  eq('the upgrade suggestion is the smallest that fits', tierNeededFor(N(100000), DEFAULT_TIERS), 'growth');
+  eq('a huge job suggests pro', tierNeededFor(N(900000), DEFAULT_TIERS), 'pro');
+
+  console.log('\nSubscription expiry');
+  const future = new Date(Date.now() + 30 * 86_400_000);
+  const past = new Date(Date.now() - 1 * 86_400_000);
+  eq('a live paid plan applies', effectiveTier({ subscriptionTier: 'pro', subscriptionEndsAt: future }), 'pro');
+  // A printer whose card failed loses the higher cap, not their shop.
+  eq('a lapsed plan falls back to free', effectiveTier({ subscriptionTier: 'pro', subscriptionEndsAt: past }), 'free');
+  eq('a paid tier with no end date is not trusted',
+    effectiveTier({ subscriptionTier: 'growth', subscriptionEndsAt: null }), 'free');
+  eq('an unknown tier is free', effectiveTier({ subscriptionTier: 'enterprise', subscriptionEndsAt: future }), 'free');
+
+  // The brief requires 7 days' notice before auto-renewal.
+  eq('notice shows inside 7 days', needsRenewalNotice(new Date(Date.now() + 3 * 86_400_000)), true);
+  eq('no notice at 20 days out', needsRenewalNotice(new Date(Date.now() + 20 * 86_400_000)), false);
+  eq('no notice once it has lapsed', needsRenewalNotice(past), false);
+  eq('the notice window is 7 days', RENEWAL_NOTICE_DAYS, 7);
+  eq('days remaining counts down', (daysUntil(new Date(Date.now() + 5 * 86_400_000)) ?? 0) <= 5, true);
 
   console.log(`\n${pass} passed, ${fail} failed\n`);
   process.exit(fail === 0 ? 0 : 1);

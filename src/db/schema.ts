@@ -127,6 +127,17 @@ export const shops = pgTable('shops', {
    * 2 = Verified, admin-approved against CAC or a work permit — this is what shows the badge.
    */
   verificationTier: integer('verification_tier').notNull().default(1),
+  /**
+   * Vendor subscription (September brief). Every printer starts Free, so this is never null in
+   * practice — but a lapsed paid tier falls back to Free rather than cutting the shop off, so
+   * the end date is what actually decides what they get. See effectiveTier().
+   */
+  subscriptionTier: text('subscription_tier').notNull().default('free'),
+  subscriptionStartedAt: timestamp('subscription_started_at', { withTimezone: true }),
+  subscriptionEndsAt: timestamp('subscription_ends_at', { withTimezone: true }),
+  subscriptionAutoRenew: boolean('subscription_auto_renew').notNull().default(true),
+  /** Paystack reference for the most recent subscription payment, for reconciliation. */
+  subscriptionRef: text('subscription_ref'),
   ratingAvg: doublePrecision('rating_avg').notNull().default(0),
   ratingCount: integer('rating_count').notNull().default(0),
   isActive: boolean('is_active').notNull().default(true),
@@ -398,6 +409,30 @@ export const designRevisionCharges = pgTable('design_revision_charges', {
 }, (t) => [
   uniqueIndex('design_revision_ref_uq').on(t.reference),
   index('design_revision_order_idx').on(t.designOrderId, t.paymentStatus),
+]);
+
+/* ------------------------------------------------------------------ */
+/* Subscriptions                                                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Every subscription payment, kept as a ledger rather than only on the shop row. A printer
+ * disputing what they paid for, or an admin reconciling against Paystack, needs the history —
+ * the shop row only ever shows the current state.
+ */
+export const subscriptionPayments = pgTable('subscription_payments', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  shopId: uuid('shop_id').notNull().references(() => shops.id, { onDelete: 'cascade' }),
+  tier: text('tier').notNull(),
+  reference: text('reference').notNull(),
+  amountKobo: integer('amount_kobo').notNull(),
+  paymentStatus: paymentStatus('payment_status').notNull().default('unpaid'),
+  periodStart: timestamp('period_start', { withTimezone: true }),
+  periodEnd: timestamp('period_end', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex('subscription_ref_uq').on(t.reference),
+  index('subscription_shop_idx').on(t.shopId, t.createdAt),
 ]);
 
 /* ------------------------------------------------------------------ */

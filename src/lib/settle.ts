@@ -78,6 +78,7 @@ function isPendingOrderMetadata(m: unknown): m is PendingOrderMetadata {
 export async function settlePayment(reference: string): Promise<{ ok: true } | { ok: false; message: string }> {
   if (reference.startsWith('PRD-')) return settleDesignOrder(reference);
   if (reference.startsWith('PRR-')) return settleRevisionCharge(reference);
+  if (reference.startsWith('PRS-')) return settleSubscription(reference);
   return settlePrintOrder(reference);
 }
 
@@ -367,6 +368,47 @@ async function settleRevisionCharge(reference: string): Promise<{ ok: true } | {
   await db().update(tables.designRevisionCharges)
     .set({ paymentStatus: 'paid' })
     .where(eq(tables.designRevisionCharges.id, charge.id));
+
+  return { ok: true };
+}
+
+/* ------------------------------------------------------------------ */
+/* Subscription settlement                                             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A subscription payment. The row already exists (created when the printer started checkout),
+ * so there is nothing to duplicate here — only to mark paid and move the shop onto the tier.
+ *
+ * The tier is applied HERE and nowhere else, so an abandoned payment can never upgrade a shop.
+ */
+async function settleSubscription(reference: string): Promise<{ ok: true } | { ok: false; message: string }> {
+  const [payment] = await db().select().from(tables.subscriptionPayments)
+    .where(eq(tables.subscriptionPayments.reference, reference)).limit(1);
+  if (!payment) return { ok: false, message: 'That subscription payment no longer exists.' };
+  if (payment.paymentStatus === 'paid') return { ok: true };
+
+  let data;
+  try {
+    data = await paystackVerify(reference);
+  } catch {
+    return { ok: false, message: 'Could not reach Paystack. Try again in a moment.' };
+  }
+  if (data.status !== 'success') return { ok: false, message: 'Payment was not completed.' };
+  if (data.amount !== payment.amountKobo) {
+    return { ok: false, message: 'Amount mismatch — contact support with your reference.' };
+  }
+
+  await db().update(tables.subscriptionPayments)
+    .set({ paymentStatus: 'paid' })
+    .where(eq(tables.subscriptionPayments.id, payment.id));
+
+  await db().update(tables.shops).set({
+    subscriptionTier: payment.tier,
+    subscriptionStartedAt: payment.periodStart,
+    subscriptionEndsAt: payment.periodEnd,
+    subscriptionRef: reference,
+  }).where(eq(tables.shops.id, payment.shopId));
 
   return { ok: true };
 }
