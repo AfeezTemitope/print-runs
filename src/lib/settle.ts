@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { naira } from '@/lib/format';
-import { orderConfirmed, newJobForPrinter, designOrderConfirmed, newDesignBrief } from '@/lib/email';
+import { orderConfirmed, newJobForPrinter, designOrderConfirmed, newDesignBrief } from '@/lib/notify';
 import { specSummary } from '@/lib/spec';
 import { db, tables } from '@/db';
 import { paystackVerify } from '@/lib/paystack';
@@ -215,8 +215,8 @@ async function settlePrintOrder(reference: string): Promise<{ ok: true } | { ok:
     const summary = specSummary(finalOrder.spec).join(' · ');
     const [shop] = await db().select().from(tables.shops).where(eq(tables.shops.id, finalOrder.shopId)).limit(1);
 
-    if (finalOrder.contactEmail) {
-      await orderConfirmed(finalOrder.contactEmail, {
+    {
+      await orderConfirmed({ userId: finalOrder.customerId, email: finalOrder.contactEmail }, {
         code: finalOrder.code,
         total: naira(finalOrder.amountPaidKobo),
         printer: shop?.businessName ?? 'your printer',
@@ -225,7 +225,7 @@ async function settlePrintOrder(reference: string): Promise<{ ok: true } | { ok:
 
     if (shop) {
       const [owner] = await db().select().from(tables.users).where(eq(tables.users.id, shop.userId)).limit(1);
-      if (owner?.email) await newJobForPrinter(owner.email, { code: finalOrder.code, summary });
+      if (owner) await newJobForPrinter({ userId: owner.id, email: owner.email }, { code: finalOrder.code, summary });
     }
   }
 
@@ -326,8 +326,8 @@ async function settleDesignOrder(reference: string): Promise<{ ok: true } | { ok
   if (created) {
     const [studio] = await db().select().from(tables.designerStudios)
       .where(eq(tables.designerStudios.id, meta.studioId)).limit(1);
-    if (meta.contactEmail) {
-      await designOrderConfirmed(meta.contactEmail, {
+    {
+      await designOrderConfirmed({ userId: meta.customerId, email: meta.contactEmail }, {
         code: reference,
         total: naira(expected),
         studio: studio?.displayName ?? 'your designer',
@@ -337,7 +337,7 @@ async function settleDesignOrder(reference: string): Promise<{ ok: true } | { ok
     if (studio) {
       const [owner] = await db().select().from(tables.users)
         .where(eq(tables.users.id, studio.userId)).limit(1);
-      if (owner?.email) await newDesignBrief(owner.email, { code: reference, service: meta.serviceTitle });
+      if (owner) await newDesignBrief({ userId: owner.id, email: owner.email }, { code: reference, service: meta.serviceTitle });
     }
   }
 

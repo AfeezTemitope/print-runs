@@ -4,6 +4,28 @@ import { createRecipient, initiateTransfer, transfersEnabled } from '@/lib/payst
 import { DISPUTE_WINDOW_HOURS } from '@/lib/trust';
 import { effectiveTier } from '@/lib/subscriptions';
 import { getTierConfig } from '@/lib/tier-config';
+import { payoutSent } from '@/lib/notify';
+import { naira } from '@/lib/format';
+
+/** Tell the printer their money has gone. Never throws — the payout itself is what matters. */
+export async function notifyPaid(payoutId: string) {
+  try {
+    const [row] = await db()
+      .select({ payout: tables.payouts, order: tables.orders, shop: tables.shops })
+      .from(tables.payouts)
+      .innerJoin(tables.orders, eq(tables.payouts.orderId, tables.orders.id))
+      .innerJoin(tables.shops, eq(tables.payouts.shopId, tables.shops.id))
+      .where(eq(tables.payouts.id, payoutId)).limit(1);
+    if (!row) return;
+    const [owner] = await db().select().from(tables.users).where(eq(tables.users.id, row.shop.userId)).limit(1);
+    await payoutSent(
+      { userId: owner?.id, email: owner?.email },
+      { code: row.order.code, amount: naira(row.payout.amountKobo), kind: row.payout.kind },
+    );
+  } catch (e) {
+    console.error('[payouts] notify failed:', e);
+  }
+}
 
 /**
  * How printers get paid (brief item #9).
@@ -119,10 +141,57 @@ export async function executePayout(payoutId: string): Promise<{ ok: true; state
     return { ok: false, message: sent.message };
   }
 
+  /**
+   * The request succeeding is NOT the transfer being sent. Paystack ships with "Confirm
+   * transfers before sending" switched on, and in that mode it returns status 'otp': accepted,
+   * but held until someone types a code from the business phone. Treating that as processing
+   * would leave the payout waiting on a webhook that never comes — never paid, never flagged.
+   *
+   * So anything other than an in-flight status is surfaced as a failure an admin can see, with
+   * the reason spelled out.
+   */
+  const status = (sent.data.status ?? '').toLowerCase();
+
+  if (status === 'otp') {
+    const reason = 'Paystack is asking for an OTP. Untick "Confirm transfers before sending" in Paystack → Settings → Preferences, then retry.';
+    await db().update(tables.payouts)
+      .set({ state: 'failed', transferCode: sent.data.transfer_code, failureReason: reason })
+      .where(eq(tables.payouts.id, payout.id));
+    return { ok: false, message: reason };
+  }
+
+  if (status === 'failed' || status === 'reversed') {
+    const reason = `Paystack reported the transfer as ${status}.`;
+    await db().update(tables.payouts)
+      .set({ state: 'failed', transferCode: sent.data.transfer_code, failureReason: reason })
+      .where(eq(tables.payouts.id, payout.id));
+    return { ok: false, message: reason };
+  }
+
+  // In test mode Paystack returns success immediately, with no webhook to follow — so a
+  // success here is final rather than something to wait on.
+  if (status === 'success') {
+    await db().update(tables.payouts).set({
+      state: 'paid', paidBy: 'auto', paidAt: new Date(),
+      transferCode: sent.data.transfer_code, failureReason: null,
+    }).where(eq(tables.payouts.id, payout.id));
+    await notifyPaid(payout.id);
+    return { ok: true, state: 'paid' };
+  }
+
+  // 'pending' / 'processing' — genuinely in flight; the webhook settles it.
   await db().update(tables.payouts).set({
     state: 'processing', transferCode: sent.data.transfer_code, failureReason: null,
   }).where(eq(tables.payouts.id, payout.id));
   return { ok: true, state: 'processing' };
+}
+
+/** Statuses Paystack can return on a transfer request, and what each means for a payout. */
+export function payoutStateFor(transferStatus: string): 'paid' | 'processing' | 'failed' {
+  const s = transferStatus.toLowerCase();
+  if (s === 'success') return 'paid';
+  if (s === 'otp' || s === 'failed' || s === 'reversed') return 'failed';
+  return 'processing';
 }
 
 /**

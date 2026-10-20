@@ -18,8 +18,9 @@ async function main() {
     process.exit(1);
   }
 
-  const { emailConfigured, orderConfirmed, orderReady, orderOnTheWay, newJobForPrinter } =
-    await import('../src/lib/email');
+  const { emailConfigured } = await import('../src/lib/email');
+  // Events live behind the notification interface now; email is one channel among several.
+  const { orderConfirmed, orderReady, orderOnTheWay, newJobForPrinter } = await import('../src/lib/notify');
 
   if (!emailConfigured()) {
     console.log('\nRESEND_API_KEY / EMAIL_FROM are not set — nothing will actually send.');
@@ -35,7 +36,8 @@ async function main() {
   ] as const;
 
   console.log('');
-  for (const [name, r] of results) {
+  for (const [name, all] of results) {
+    const r = all.find((c) => c.channel === 'email') ?? { sent: false, reason: 'missing' };
     console.log(`  ${r.sent ? 'sent   ' : 'skipped'}  ${name}${r.reason ? `  (${r.reason})` : ''}`);
   }
   console.log('');

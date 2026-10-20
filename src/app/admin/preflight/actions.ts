@@ -5,7 +5,7 @@ import { eq } from 'drizzle-orm';
 import { db, tables } from '@/db';
 import { getSession } from '@/lib/auth';
 import { FAILURE_COPY, type CheckKey } from '@/lib/preflight';
-import { preflightPassed, preflightFailed } from '@/lib/email';
+import { preflightPassed, preflightFailed } from '@/lib/notify';
 
 async function assertAdmin() {
   const session = await getSession();
@@ -48,8 +48,8 @@ export async function passReview(reviewId: string, note: string) {
 
   const [shop] = await db().select().from(tables.shops)
     .where(eq(tables.shops.id, order.shopId)).limit(1);
-  if (order.contactEmail) {
-    await preflightPassed(order.contactEmail, { code: order.code, printer: shop?.businessName ?? 'your printer' });
+  {
+    await preflightPassed({ userId: order.customerId, email: order.contactEmail }, { code: order.code, printer: shop?.businessName ?? 'your printer' });
   }
 
   touched(order.id);
@@ -84,8 +84,8 @@ export async function failReview(reviewId: string, checks: string[], note: strin
     reviewerNote: note.trim() || null, decidedAt: new Date(),
   }).where(eq(tables.preflightReviews.id, reviewId));
 
-  if (order.contactEmail) {
-    await preflightFailed(order.contactEmail, {
+  {
+    await preflightFailed({ userId: order.customerId, email: order.contactEmail }, {
       code: order.code,
       issues: findings.map((f) => f.note),
       note: note.trim(),

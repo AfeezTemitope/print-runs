@@ -5,7 +5,7 @@ import { and, eq } from 'drizzle-orm';
 import { db, tables } from '@/db';
 import { getMyShop } from '@/lib/auth';
 import { canDecline, canDispatch, canSetDeliveryFee, dispatchBlockedReason } from '@/lib/status';
-import { orderReady, orderOnTheWay } from '@/lib/email';
+import { orderReady, orderOnTheWay } from '@/lib/notify';
 import { naira } from '@/lib/format';
 
 /**
@@ -77,8 +77,8 @@ export async function markReadyForDispatch(orderId: string) {
   if (!res.length) return { error: 'Finish printing first — this job is not marked done.' };
 
   const updated = res[0];
-  if (updated.contactEmail) {
-    await orderReady(updated.contactEmail, {
+  {
+    await orderReady({ userId: updated.customerId, email: updated.contactEmail }, {
       code: updated.code,
       printer: shop.businessName,
       collection: updated.fulfillmentMethod === 'collection',
@@ -109,8 +109,8 @@ export async function dispatchRider(orderId: string) {
 
   // Reminds them of the exact cash amount to have ready, which is the whole risk in a
   // cash-on-delivery handover: a rider arriving to someone with no money in the house.
-  if (order.contactEmail) {
-    await orderOnTheWay(order.contactEmail, { code: order.code, fee: naira(order.deliveryFeeKobo) });
+  {
+    await orderOnTheWay({ userId: order.customerId, email: order.contactEmail }, { code: order.code, fee: naira(order.deliveryFeeKobo) });
   }
 
   revalidatePath('/dashboard/queue');

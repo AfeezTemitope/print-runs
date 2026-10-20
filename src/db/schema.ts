@@ -424,6 +424,27 @@ export const designRevisionCharges = pgTable('design_revision_charges', {
 ]);
 
 /* ------------------------------------------------------------------ */
+/* In-app notifications                                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The in-app channel of the notification interface (see src/lib/notify.ts). Written by
+ * deliver() alongside the email, and read by the bell in the nav.
+ */
+export const notifications = pgTable('notifications', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  title: text('title').notNull(),
+  body: text('body'),
+  /** A path, not a full URL, so it keeps working across domains and preview deployments. */
+  href: text('href'),
+  readAt: timestamp('read_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  index('notifications_user_unread_idx').on(t.userId, t.readAt, t.createdAt),
+]);
+
+/* ------------------------------------------------------------------ */
 /* Payouts (Round 3b)                                                  */
 /* ------------------------------------------------------------------ */
 

@@ -1,3 +1,4 @@
+import { execSync } from 'node:child_process';
 /* Runtime checks for the V2 pricing engine: npx tsx scripts/test-pricing.ts
    Pure-function tests — no DB, no network. Verifies the money math actually produces the
    numbers the founder decisions specify, not just that it type-checks. */
@@ -9,7 +10,7 @@ import {
   DEFAULT_TIERS, effectiveTier, withinOrderCap, tierNeededFor,
   needsRenewalNotice, daysUntil, BILLING_CYCLE_DAYS, RENEWAL_NOTICE_DAYS,
 } from '../src/lib/subscriptions';
-import { advanceAmount, settlementAmount, canRequestAdvance, ADVANCE_SHARE } from '../src/lib/payouts';
+import { advanceAmount, settlementAmount, canRequestAdvance, ADVANCE_SHARE, payoutStateFor } from '../src/lib/payouts';
 import {
   stepsFor, statusLabel, canDecline, isSettlementEligible, QUEUE_STATUSES,
   canDispatch, canSetDeliveryFee, dispatchBlockedReason,
@@ -38,6 +39,7 @@ import {
 } from '../src/lib/design-orders';
 import { designOrderCode, revisionChargeCode } from '../src/lib/format';
 import { emailConfigured, sendEmail } from '../src/lib/email';
+import { deliver, plainText } from '../src/lib/notify';
 import { LEGAL_DOCS, LEGAL_VERSION, getLegalDoc, readLegalDoc, parseLegal, inlineSegments } from '../src/lib/legal';
 
 let pass = 0;
@@ -638,6 +640,43 @@ console.log('\nPayout amounts (brief #9)');
   // Every refusal must say why, or the printer is left staring at a button that did nothing.
   const refused = canRequestAdvance({ ...okAdvance, status: 'order_received' });
   eq('a refusal explains itself', !refused.ok && refused.reason.length > 10, true);
+
+console.log('\nTransfer status handling');
+  // Paystack ships with "Confirm transfers before sending" ON. A request in that mode returns
+  // 'otp' — accepted but NOT sent. Waiting on it as 'processing' would hang every payout.
+  eq('otp is a failure, not in flight', payoutStateFor('otp'), 'failed');
+  eq('OTP in any case is still caught', payoutStateFor('OTP'), 'failed');
+  eq('a failed transfer is failed', payoutStateFor('failed'), 'failed');
+  eq('a reversed transfer is failed', payoutStateFor('reversed'), 'failed');
+  // Test mode returns success with no webhook to follow, so success must be final.
+  eq('success is paid immediately', payoutStateFor('success'), 'paid');
+  eq('pending waits for the webhook', payoutStateFor('pending'), 'processing');
+
+console.log('\nNotification interface (brief: build without Termii)');
+  // The whole point: callers name a person and an event, never a channel. If any file outside
+  // the interface imports the email channel's event functions directly, adding WhatsApp would
+  // mean editing call sites again — exactly what the founder asked to avoid.
+  const offenders = execSync('grep -rln "sendEmail" src/ || true', { encoding: 'utf8' })
+    .split('\n').filter(Boolean)
+    .filter((f) => !f.endsWith('lib/email.ts') && !f.endsWith('lib/notify.ts'));
+  eq('nothing outside the interface sends email directly', offenders, []);
+  const eventImports = execSync(`grep -rln "from '@/lib/email'" src/ || true`, { encoding: 'utf8' })
+    .split('\n').filter(Boolean).filter((f) => !f.endsWith('lib/notify.ts'));
+  eq('no call site imports the email channel', eventImports, []);
+
+  eq('html is stripped for inbox and whatsapp', plainText('<strong>Paid</strong> today'), 'Paid today');
+  eq('whitespace is collapsed', plainText('a\n\n   b'), 'a b');
+
+  // With email off and no account, every channel declines cleanly and nothing throws.
+  const prevKey = process.env.RESEND_API_KEY;
+  delete process.env.RESEND_API_KEY;
+  const guest = await deliver('guest@example.com', { subject: 's', heading: 'h', body: ['b'] });
+  eq('every channel reports back', guest.map((r) => r.channel), ['email', 'inapp', 'whatsapp']);
+  eq('a guest has no inbox, so in-app declines', guest.find((r) => r.channel === 'inapp')?.reason, 'no_account');
+  // WhatsApp is a real channel, present and OFF — switching it on changes one file only.
+  eq('whatsapp is wired but off', guest.find((r) => r.channel === 'whatsapp')?.reason, 'not_enabled');
+  eq('nothing was falsely reported as sent', guest.every((r) => !r.sent), true);
+  if (prevKey) process.env.RESEND_API_KEY = prevKey;
 
   console.log(`\n${pass} passed, ${fail} failed\n`);
   process.exit(fail === 0 ? 0 : 1);

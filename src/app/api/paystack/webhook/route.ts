@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
 import crypto from 'node:crypto';
-import { eq } from 'drizzle-orm';
+import { and, eq, ne } from 'drizzle-orm';
 import { db, tables } from '@/db';
 import { settlePayment } from '@/lib/settle';
+import { notifyPaid } from '@/lib/payouts';
 
 /** Paystack webhook — HMAC-SHA512 signature check on the raw body, then idempotent settle. */
 export async function POST(req: Request) {
@@ -39,9 +40,13 @@ export async function POST(req: Request) {
   const ref = event.data?.reference;
   if (ref && ref.startsWith('PRP-')) {
     if (event.event === 'transfer.success') {
-      await db().update(tables.payouts)
+      // Only notify on the transition INTO paid, so a webhook Paystack retries cannot send the
+      // printer a second "you've been paid".
+      const updated = await db().update(tables.payouts)
         .set({ state: 'paid', paidBy: 'auto', paidAt: new Date(), failureReason: null })
-        .where(eq(tables.payouts.reference, ref));
+        .where(and(eq(tables.payouts.reference, ref), ne(tables.payouts.state, 'paid')))
+        .returning({ id: tables.payouts.id });
+      if (updated[0]) await notifyPaid(updated[0].id);
     } else if (event.event === 'transfer.failed' || event.event === 'transfer.reversed') {
       await db().update(tables.payouts)
         .set({

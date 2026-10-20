@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { and, eq } from 'drizzle-orm';
 import { db, tables } from '@/db';
 import { getMyShop } from '@/lib/auth';
-import { quoteReady } from '@/lib/email';
+import { quoteReady } from '@/lib/notify';
 
 /**
  * The printer answers a quote request with a price (Module 2 §7.2). Nothing is charged here —
@@ -34,8 +34,8 @@ export async function sendQuote(orderId: string, naira: string, note: string) {
     updatedAt: new Date(),
   }).where(eq(tables.orders.id, orderId));
 
-  if (order.contactEmail) {
-    await quoteReady(order.contactEmail, {
+  {
+    await quoteReady({ userId: order.customerId, email: order.contactEmail }, {
       code: order.code,
       printer: shop.businessName,
       amount: kobo,

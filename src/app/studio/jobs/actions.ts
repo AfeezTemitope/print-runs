@@ -5,7 +5,7 @@ import { and, eq } from 'drizzle-orm';
 import { db, tables } from '@/db';
 import { getMyStudio } from '@/lib/designers';
 import { proofsFor } from '@/lib/design-orders';
-import { proofReady } from '@/lib/email';
+import { proofReady } from '@/lib/notify';
 
 async function myOrder(orderId: string) {
   const studio = await getMyStudio();
@@ -63,8 +63,8 @@ export async function submitProof(orderId: string, fileUrl: string, note: string
     await db().update(tables.designOrders)
       .set({ status: 'proof_ready', updatedAt: new Date() })
       .where(eq(tables.designOrders.id, order.id));
-    if (order.contactEmail) {
-      await proofReady(order.contactEmail, { code: order.code, round, studio: studio.displayName });
+    {
+      await proofReady({ userId: order.customerId, email: order.contactEmail }, { code: order.code, round, studio: studio.displayName });
     }
   }
 

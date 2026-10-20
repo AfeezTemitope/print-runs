@@ -5,7 +5,7 @@ import { and, desc, eq } from 'drizzle-orm';
 import { db, tables } from '@/db';
 import { getSession } from '@/lib/auth';
 import { canApprove, canRequestRevision, freeRevisionsLeft, unconsumedPaidRevisions } from '@/lib/design-orders';
-import { designApproved, revisionRequested } from '@/lib/email';
+import { designApproved, revisionRequested } from '@/lib/notify';
 
 async function myOrder(orderId: string) {
   const session = await getSession();
@@ -45,7 +45,7 @@ export async function approveProof(orderId: string) {
     .where(eq(tables.designerStudios.id, order.studioId)).limit(1);
   if (studio) {
     const [owner] = await db().select().from(tables.users).where(eq(tables.users.id, studio.userId)).limit(1);
-    if (owner?.email) await designApproved(owner.email, { code: order.code });
+    if (owner) await designApproved({ userId: owner.id, email: owner.email }, { code: order.code });
   }
 
   revalidatePath(`/orders/design/${order.code}`);
@@ -95,7 +95,7 @@ export async function requestRevision(orderId: string, note: string) {
     .where(eq(tables.designerStudios.id, order.studioId)).limit(1);
   if (studio) {
     const [owner] = await db().select().from(tables.users).where(eq(tables.users.id, studio.userId)).limit(1);
-    if (owner?.email) await revisionRequested(owner.email, { code: order.code, note: note.trim() });
+    if (owner) await revisionRequested({ userId: owner.id, email: owner.email }, { code: order.code, note: note.trim() });
   }
 
   revalidatePath(`/orders/design/${order.code}`);

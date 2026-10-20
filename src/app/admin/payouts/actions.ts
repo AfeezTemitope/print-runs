@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { eq } from 'drizzle-orm';
 import { db, tables } from '@/db';
 import { getSession } from '@/lib/auth';
-import { executePayout, runSettlement } from '@/lib/payouts';
+import { executePayout, runSettlement, notifyPaid } from '@/lib/payouts';
 import { transfersEnabled } from '@/lib/paystack';
 
 async function assertAdmin() {
@@ -41,6 +41,7 @@ export async function releasePayout(payoutId: string) {
   await db().update(tables.payouts)
     .set({ state: 'paid', paidBy: 'manual', paidAt: new Date(), failureReason: null })
     .where(eq(tables.payouts.id, payout.id));
+  await notifyPaid(payout.id);
   touched();
   return { ok: true as const };
 }
